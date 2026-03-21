@@ -1,2 +1,3 @@
 # ECHO_CS5224
-AI friend
+
+Technical details here: https://hackmd.io/oNilvys2TCCxZnkP9YgUrw
