@@ -1,3 +1,8 @@
-# Proactive Engagement Service
-# Determines when ECHO should initiate outbound engagement and manages the
-# candidate selection, policy checking, and message dispatch pipeline.
+"""
+Proactive Engagement Service v2.0
+
+Scheduled task management and polling engine for proactive outbound
+messaging in the ECHO platform.
+"""
+
+__version__ = "2.0.0"

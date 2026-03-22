@@ -4,7 +4,7 @@ Response models for AI Generation Service endpoints.
 These Pydantic models define the contract for all outbound API responses.
 """
 
-from typing import List, Optional
+from typing import Dict, List, Optional, Any
 
 from pydantic import BaseModel, Field
 
@@ -39,6 +39,48 @@ class UsageInfo(BaseModel):
         description="Number of output tokens generated.",
         examples=[39],
     )
+
+
+# ------------------------------------------------------------------ #
+# Unified Generation Response (for /execute endpoint)
+# ------------------------------------------------------------------ #
+
+
+class GenerationResponse(BaseModel):
+    """
+    Response body for POST /api/v1/generation/execute.
+
+    This is the primary response model for the unified generation endpoint.
+    """
+
+    response_id: str = Field(
+        ...,
+        description="Unique identifier for this generation response.",
+        examples=["gen-445"],
+    )
+    template_id: str = Field(
+        ...,
+        description="The template ID that was used for generation.",
+        examples=["tpl_chat_completion"],
+    )
+    output: List[OutputItem] = Field(
+        ...,
+        description="List of generated output segments.",
+    )
+    model: str = Field(
+        ...,
+        description="Model identifier used for generation.",
+        examples=["claude-sonnet"],
+    )
+    usage: UsageInfo = Field(
+        ...,
+        description="Token usage statistics.",
+    )
+
+
+# ------------------------------------------------------------------ #
+# Legacy Response Models (kept for backward compatibility)
+# ------------------------------------------------------------------ #
 
 
 class ChatCompletionResponse(BaseModel):

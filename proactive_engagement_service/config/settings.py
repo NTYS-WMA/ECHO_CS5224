@@ -1,62 +1,94 @@
 """
-Configuration settings for the Proactive Engagement Service.
+Configuration settings for the Proactive Engagement Service v2.0.
 
-Loads configuration from environment variables with sensible defaults.
+All settings can be overridden via environment variables with the
+PROACTIVE_ prefix.
 """
 
 from functools import lru_cache
-from typing import Optional
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """Proactive Engagement Service configuration."""
+    """Application settings loaded from environment variables."""
 
     # Service identity
-    SERVICE_NAME: str = "proactive-engagement-service"
-    SERVICE_VERSION: str = "1.0.0"
-    HOST: str = "0.0.0.0"
-    PORT: int = 8006
+    SERVICE_NAME: str = Field(
+        default="proactive-engagement-service",
+        description="Service name for logging and registration.",
+    )
+    SERVICE_VERSION: str = Field(
+        default="2.0.0",
+        description="Service version.",
+    )
+    HOST: str = Field(
+        default="0.0.0.0",
+        description="Bind host.",
+    )
+    PORT: int = Field(
+        default=8002,
+        description="HTTP port for the service.",
+    )
+    LOG_LEVEL: str = Field(
+        default="INFO",
+        description="Logging level.",
+    )
 
-    # Dependent service URLs
-    # Relationship Service
-    RELATIONSHIP_SERVICE_BASE_URL: str = "http://localhost:8004"
-    # User Profile Service
-    USER_PROFILE_SERVICE_BASE_URL: str = "http://localhost:8002"
-    # AI Generation Service
-    AI_GENERATION_SERVICE_BASE_URL: str = "http://localhost:8003"
-    # Memory Service (for retrieving recent summaries)
-    # TO BE UPDATED: Confirm Memory Service URL and endpoint for summary retrieval
-    MEMORY_SERVICE_BASE_URL: str = "http://localhost:18088"
+    # Database Service (external)
+    DATABASE_SERVICE_URL: str = Field(
+        default="http://localhost:8010",
+        description="Base URL of the Database Service module.",
+    )
+    DATABASE_SERVICE_TIMEOUT: int = Field(
+        default=10,
+        description="HTTP timeout for Database Service calls (seconds).",
+    )
 
-    # Event broker configuration
+    # Message Dispatch Hub (external)
+    DISPATCH_HUB_URL: str = Field(
+        default="http://localhost:8020",
+        description="Base URL of the Message Dispatch Hub.",
+    )
+    DISPATCH_HUB_TIMEOUT: int = Field(
+        default=15,
+        description="HTTP timeout for Message Dispatch Hub calls (seconds).",
+    )
+
+    # Polling Scheduler
+    POLL_INTERVAL_SECONDS: int = Field(
+        default=30,
+        ge=5,
+        description="Seconds between polling cycles.",
+    )
+    MAX_TASKS_PER_POLL: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Maximum tasks to process per poll cycle.",
+    )
+    SCHEDULER_ENABLED: bool = Field(
+        default=True,
+        description="Whether to start the background polling scheduler on boot.",
+    )
+
+    # Event Publishing (Internal Messaging Layer)
     # TO BE UPDATED: Actual broker implementation details
-    EVENT_BROKER_URL: str = "redis://localhost:6379/0"
-    EVENT_PUBLISH_ENABLED: bool = True
-    EVENT_CONSUME_ENABLED: bool = True
-
-    # Proactive engagement policy defaults
-    DEFAULT_MIN_DAYS_INACTIVE: int = 3
-    DEFAULT_MIN_AFFINITY_SCORE: float = 0.5
-    DEFAULT_MAX_BATCH_SIZE: int = 500
-    DEFAULT_QUIET_HOURS_START: str = "22:00"
-    DEFAULT_QUIET_HOURS_END: str = "07:00"
-
-    # Proactive message generation defaults
-    DEFAULT_PROACTIVE_MAX_TOKENS: int = 120
-    DEFAULT_PROACTIVE_TONE: str = "friendly"
-
-    # Concurrency and rate limiting
-    MAX_CONCURRENT_DISPATCHES: int = 10
-    DISPATCH_RATE_LIMIT_PER_SECOND: float = 5.0
+    EVENT_BROKER_URL: str = Field(
+        default="http://localhost:9092",
+        description="URL of the internal messaging broker (Kafka / SNS / etc.).",
+    )
+    EVENT_PUBLISH_ENABLED: bool = Field(
+        default=True,
+        description="Whether to publish lifecycle events.",
+    )
 
     # HTTP client settings
-    HTTP_TIMEOUT_SECONDS: int = 15
-
-    # Observability
-    LOG_LEVEL: str = "INFO"
-    ENABLE_TELEMETRY_EVENTS: bool = True
+    HTTP_TIMEOUT_SECONDS: int = Field(
+        default=15,
+        description="Default HTTP client timeout.",
+    )
 
     class Config:
         env_prefix = "PROACTIVE_"

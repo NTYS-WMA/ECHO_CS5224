@@ -1,6 +1,6 @@
 # AI Generation Service — Assumed External Interfaces
 
-**Version**: 1.0  
+**Version**: 2.0  
 **Last Updated**: 2026-03-23  
 **Status**: TO BE UPDATED — These interfaces are assumed based on the architecture specification and have not been confirmed with the owning teams.
 
@@ -17,7 +17,7 @@ This document lists all external service interfaces that the AI Generation Servi
 **Owner**: Platform / Data Team  
 **Status**: TO BE UPDATED
 
-The AI Generation Service calls this endpoint when processing summary generation requests (`POST /api/v1/generation/summaries`). The summary request specifies a message window by ID range, and the service needs to retrieve the actual message content to build the summarization prompt.
+The AI Generation Service calls this endpoint when processing summary generation requests (legacy `POST /api/v1/generation/summaries` or via `execute` with `tpl_memory_compaction`). The summary request specifies a message window by ID range, and the service needs to retrieve the actual message content to build the summarization prompt.
 
 **Assumed Endpoint**:
 
@@ -29,11 +29,11 @@ GET /api/v1/conversations/{conversation_id}/messages?from_id={from_message_id}&t
 
 **Assumed Request**:
 
-| Parameter         | Location | Type   | Required | Description                        |
-|-------------------|----------|--------|----------|------------------------------------|
-| `conversation_id` | path     | string | yes      | Conversation identifier            |
-| `from_id`         | query    | string | yes      | Starting message ID (inclusive)    |
-| `to_id`           | query    | string | yes      | Ending message ID (inclusive)      |
+| Parameter | Location | Type | Required | Description |
+|-----------|----------|------|----------|-------------|
+| `conversation_id` | path | string | yes | Conversation identifier |
+| `from_id` | query | string | yes | Starting message ID (inclusive) |
+| `to_id` | query | string | yes | Ending message ID (inclusive) |
 
 **Assumed Response** `200 OK`:
 
@@ -74,10 +74,10 @@ The AI Generation Service publishes events to two topics for telemetry and failu
 
 **Assumed Topics**:
 
-| Topic                     | Event Type              | Description                          |
-|---------------------------|-------------------------|--------------------------------------|
-| `ai.generation.failed`    | Failure notification    | Published on hard generation failure |
-| `ai.generation.completed` | Telemetry / audit trail | Published on successful generation   |
+| Topic | Event Type | Description |
+|-------|------------|-------------|
+| `ai.generation.failed` | Failure notification | Published on hard generation failure |
+| `ai.generation.completed` | Telemetry / audit trail | Published on successful generation |
 
 **Assumed Publish Interface**:
 
@@ -99,7 +99,7 @@ await queue.put({"topic": topic, "payload": json_payload})
 **Notes**:
 
 - Event publishing failures must not break the main request flow. They are logged and swallowed.
-- Events are JSON-serialized using the schemas defined in [API_INTERFACES.md](./API_INTERFACES.md#4-published-events).
+- Events are JSON-serialized using the schemas defined in [API_INTERFACES.md](./API_INTERFACES.md#6-published-events).
 
 ---
 
@@ -145,10 +145,10 @@ response = bedrock_client.converse(
 
 **Configuration**:
 
-| Environment Variable          | Description                    |
-|-------------------------------|--------------------------------|
-| `AI_GEN_BEDROCK_REGION`       | AWS region (default: ap-southeast-1) |
-| `AI_GEN_BEDROCK_MODEL_ID`     | Bedrock model identifier       |
+| Environment Variable | Description |
+|---------------------|-------------|
+| `AI_GEN_BEDROCK_REGION` | AWS region (default: ap-southeast-1) |
+| `AI_GEN_BEDROCK_MODEL_ID` | Bedrock model identifier |
 | `AI_GEN_BEDROCK_TIMEOUT_SECONDS` | Request timeout (default: 30s) |
 
 **Notes**:
@@ -158,8 +158,39 @@ response = bedrock_client.converse(
 
 ---
 
+## 4. Template Persistence (Future Enhancement)
+
+**Owner**: AI Generation Service Team  
+**Status**: TO BE UPDATED
+
+Currently, prompt templates are stored in-memory and persisted as JSON files on the local filesystem. For production deployment, a durable storage backend is recommended.
+
+**Assumed Future Options**:
+
+| Option | Description |
+|--------|-------------|
+| DynamoDB / MySQL | Persistent storage with versioning |
+| S3 | Template file storage with versioning |
+| Redis | Fast template cache with TTL |
+
+**Current Behavior**:
+
+- Preset templates are loaded from `prompt_templates/` directory on startup.
+- Dynamically registered templates are saved as JSON files in the same directory.
+- A `template_index.json` file maintains the mapping of all registered templates.
+- Template updates bump the patch version automatically.
+
+**Notes**:
+
+- The `TemplateManager` class is designed with a clean interface that can be backed by any storage implementation.
+- Template registration and update operations are idempotent within the same service instance.
+- Cross-instance consistency requires a shared storage backend (not yet implemented).
+
+---
+
 ## Revision History
 
-| Date       | Change                                    |
-|------------|-------------------------------------------|
-| 2026-03-23 | Initial assumed interfaces documented     |
+| Date | Change |
+|------|--------|
+| 2026-03-23 | v1.0 — Initial assumed interfaces documented |
+| 2026-03-23 | v2.0 — Added template persistence future enhancement; updated for template-based architecture |
