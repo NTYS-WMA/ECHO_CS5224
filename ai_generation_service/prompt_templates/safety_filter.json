@@ -1,0 +1,24 @@
+{
+  "template_id": "tpl_safety_filter",
+  "name": "Safety Content Filter",
+  "description": "System-level template for checking whether generated or user-provided content meets ECHO platform safety guidelines. Used as a guardrail layer.",
+  "version": "1.0.0",
+  "owner": "ai-generation-service",
+  "category": "safety",
+  "system_prompt": "You are a content safety evaluator for the ECHO companion platform. Evaluate the given content against the platform's safety guidelines. Be strict but fair. Do not flag content that is merely negative in sentiment — only flag content that is harmful, abusive, or violates platform policies.",
+  "user_prompt_template": "Evaluate the following content for safety. Respond with a JSON object containing 'safe' (boolean), 'categories' (array of violated categories if unsafe, empty if safe), and 'explanation' (brief reason).\n\nContent:\n{{content}}",
+  "variables": {
+    "content": {
+      "type": "string",
+      "required": true,
+      "description": "The content to evaluate for safety."
+    }
+  },
+  "defaults": {
+    "temperature": 0.0,
+    "max_tokens": 200
+  },
+  "tags": ["safety", "moderation", "guardrail"],
+  "created_at": "2026-03-23T00:00:00Z",
+  "updated_at": "2026-03-23T00:00:00Z"
+}

@@ -1,10 +1,13 @@
 """
 API routes for the AI Generation Service.
 
-Exposes three generation endpoints:
-1. POST /api/v1/generation/chat-completions  — Chat completion
-2. POST /api/v1/generation/summaries         — Summary generation
-3. POST /api/v1/generation/proactive-messages — Proactive message generation
+Exposes the primary template-based generation endpoint and legacy endpoints
+for backward compatibility:
+
+1. POST /api/v1/generation/execute            — Primary: template-based generation
+2. POST /api/v1/generation/chat-completions   — Legacy: chat completion
+3. POST /api/v1/generation/summaries          — Legacy: summary generation
+4. POST /api/v1/generation/proactive-messages — Legacy: proactive message generation
 """
 
 import logging
@@ -15,10 +18,12 @@ from ..models.requests import (
     ChatCompletionRequest,
     ProactiveMessageRequest,
     SummaryGenerationRequest,
+    TemplateGenerationRequest,
 )
 from ..models.responses import (
     ChatCompletionResponse,
     ErrorResponse,
+    GenerationResponse,
     ProactiveMessageResponse,
     SummaryGenerationResponse,
 )
@@ -34,17 +39,85 @@ def get_generation_service() -> GenerationService:
     Dependency injection placeholder for the GenerationService.
 
     The actual instance is set during application startup via
-    `app.state.generation_service`.
-
-    TO BE UPDATED: Replace with proper DI container if adopted.
+    `app.get_app_generation_service()`.
     """
     from ..app import get_app_generation_service
 
     return get_app_generation_service()
 
 
+def _handle_generation_error(e: GenerationError, correlation_id=None):
+    """Map a GenerationError to an appropriate HTTP exception."""
+    status_code = 503 if e.retryable else 500
+    if e.error_code == "TEMPLATE_RENDER_ERROR":
+        status_code = 400
+    raise HTTPException(
+        status_code=status_code,
+        detail=ErrorResponse(
+            error_code=e.error_code,
+            message=str(e),
+            retryable=e.retryable,
+            correlation_id=correlation_id,
+        ).model_dump(),
+    )
+
+
+def _handle_unexpected_error(e: Exception, correlation_id=None):
+    """Map an unexpected error to a 500 HTTP exception."""
+    logger.exception("Unexpected error: %s", str(e))
+    raise HTTPException(
+        status_code=500,
+        detail=ErrorResponse(
+            error_code="INTERNAL_ERROR",
+            message="An unexpected error occurred.",
+            retryable=False,
+            correlation_id=correlation_id,
+        ).model_dump(),
+    )
+
+
 # ------------------------------------------------------------------ #
-# 1. Chat Completion
+# 1. Primary: Template-Based Generation
+# ------------------------------------------------------------------ #
+
+
+@router.post(
+    "/execute",
+    response_model=GenerationResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Template not found or render error"},
+        500: {"model": ErrorResponse, "description": "Generation failed after all retries"},
+    },
+    summary="Execute a template-based generation",
+    description=(
+        "Primary generation endpoint. Accepts a template_id and variables "
+        "(or messages for multi-turn chat). The AI service renders the prompt "
+        "from the template and executes it against the configured AI provider. "
+        "Business callers should use this endpoint for all new integrations."
+    ),
+)
+async def execute_generation(
+    request: TemplateGenerationRequest,
+    service: GenerationService = Depends(get_generation_service),
+) -> GenerationResponse:
+    """Execute a template-based generation request."""
+    try:
+        return await service.execute(request)
+    except GenerationError as e:
+        logger.error(
+            "Generation failed for user %s template %s: [%s] %s",
+            request.user_id,
+            request.template_id,
+            e.error_code,
+            str(e),
+        )
+        _handle_generation_error(e, request.correlation_id)
+    except Exception as e:
+        _handle_unexpected_error(e, request.correlation_id)
+
+
+# ------------------------------------------------------------------ #
+# 2. Legacy: Chat Completion
 # ------------------------------------------------------------------ #
 
 
@@ -54,17 +127,18 @@ def get_generation_service() -> GenerationService:
     responses={
         500: {"model": ErrorResponse, "description": "Generation failed after all retries"},
     },
-    summary="Generate a chat completion",
+    summary="Generate a chat completion (legacy)",
     description=(
-        "Accepts a conversation message list (including system prompt) and returns "
-        "an AI-generated reply. Called by the Conversation Orchestrator Service."
+        "Legacy endpoint. Accepts a conversation message list and returns an "
+        "AI-generated reply. New callers should use POST /execute instead."
     ),
+    deprecated=True,
 )
 async def chat_completion(
     request: ChatCompletionRequest,
     service: GenerationService = Depends(get_generation_service),
 ) -> ChatCompletionResponse:
-    """Handle chat completion requests from the Conversation Orchestrator."""
+    """Handle chat completion requests (legacy)."""
     try:
         return await service.chat_completion(request)
     except GenerationError as e:
@@ -74,30 +148,13 @@ async def chat_completion(
             e.error_code,
             str(e),
         )
-        raise HTTPException(
-            status_code=503 if e.retryable else 500,
-            detail=ErrorResponse(
-                error_code=e.error_code,
-                message=str(e),
-                retryable=e.retryable,
-                correlation_id=request.correlation_id,
-            ).model_dump(),
-        )
+        _handle_generation_error(e, request.correlation_id)
     except Exception as e:
-        logger.exception("Unexpected error in chat completion: %s", str(e))
-        raise HTTPException(
-            status_code=500,
-            detail=ErrorResponse(
-                error_code="INTERNAL_ERROR",
-                message="An unexpected error occurred.",
-                retryable=False,
-                correlation_id=request.correlation_id,
-            ).model_dump(),
-        )
+        _handle_unexpected_error(e, request.correlation_id)
 
 
 # ------------------------------------------------------------------ #
-# 2. Summary Generation
+# 3. Legacy: Summary Generation
 # ------------------------------------------------------------------ #
 
 
@@ -107,17 +164,18 @@ async def chat_completion(
     responses={
         500: {"model": ErrorResponse, "description": "Generation failed after all retries"},
     },
-    summary="Generate a conversation summary",
+    summary="Generate a conversation summary (legacy)",
     description=(
-        "Accepts a message window reference and generates a compact summary "
-        "for memory compaction. Called by the Memory Service."
+        "Legacy endpoint. Accepts a message window reference and generates a "
+        "compact summary. New callers should use POST /execute instead."
     ),
+    deprecated=True,
 )
 async def generate_summary(
     request: SummaryGenerationRequest,
     service: GenerationService = Depends(get_generation_service),
 ) -> SummaryGenerationResponse:
-    """Handle summary generation requests from the Memory Service."""
+    """Handle summary generation requests (legacy)."""
     try:
         return await service.generate_summary(request)
     except GenerationError as e:
@@ -127,30 +185,13 @@ async def generate_summary(
             e.error_code,
             str(e),
         )
-        raise HTTPException(
-            status_code=503 if e.retryable else 500,
-            detail=ErrorResponse(
-                error_code=e.error_code,
-                message=str(e),
-                retryable=e.retryable,
-                correlation_id=request.correlation_id,
-            ).model_dump(),
-        )
+        _handle_generation_error(e, request.correlation_id)
     except Exception as e:
-        logger.exception("Unexpected error in summary generation: %s", str(e))
-        raise HTTPException(
-            status_code=500,
-            detail=ErrorResponse(
-                error_code="INTERNAL_ERROR",
-                message="An unexpected error occurred.",
-                retryable=False,
-                correlation_id=request.correlation_id,
-            ).model_dump(),
-        )
+        _handle_unexpected_error(e, request.correlation_id)
 
 
 # ------------------------------------------------------------------ #
-# 3. Proactive Message Generation
+# 4. Legacy: Proactive Message Generation
 # ------------------------------------------------------------------ #
 
 
@@ -160,17 +201,18 @@ async def generate_summary(
     responses={
         500: {"model": ErrorResponse, "description": "Generation failed after all retries"},
     },
-    summary="Generate a proactive outreach message",
+    summary="Generate a proactive outreach message (legacy)",
     description=(
-        "Accepts relationship context and user preferences, then generates "
-        "a personalized check-in message. Called by the Proactive Engagement Service."
+        "Legacy endpoint. Accepts relationship context and generates a "
+        "personalized check-in message. New callers should use POST /execute instead."
     ),
+    deprecated=True,
 )
 async def generate_proactive_message(
     request: ProactiveMessageRequest,
     service: GenerationService = Depends(get_generation_service),
 ) -> ProactiveMessageResponse:
-    """Handle proactive message generation requests from the Proactive Engagement Service."""
+    """Handle proactive message generation requests (legacy)."""
     try:
         return await service.generate_proactive_message(request)
     except GenerationError as e:
@@ -180,23 +222,6 @@ async def generate_proactive_message(
             e.error_code,
             str(e),
         )
-        raise HTTPException(
-            status_code=503 if e.retryable else 500,
-            detail=ErrorResponse(
-                error_code=e.error_code,
-                message=str(e),
-                retryable=e.retryable,
-                correlation_id=request.correlation_id,
-            ).model_dump(),
-        )
+        _handle_generation_error(e, request.correlation_id)
     except Exception as e:
-        logger.exception("Unexpected error in proactive message generation: %s", str(e))
-        raise HTTPException(
-            status_code=500,
-            detail=ErrorResponse(
-                error_code="INTERNAL_ERROR",
-                message="An unexpected error occurred.",
-                retryable=False,
-                correlation_id=request.correlation_id,
-            ).model_dump(),
-        )
+        _handle_unexpected_error(e, request.correlation_id)

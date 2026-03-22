@@ -1,0 +1,24 @@
+{
+  "template_id": "tpl_topic_extraction",
+  "name": "Topic Extraction",
+  "description": "System-level template for extracting key topics from a conversation. The business layer provides the conversation text.",
+  "version": "1.0.0",
+  "owner": "ai-generation-service",
+  "category": "analysis",
+  "system_prompt": "You are a topic extraction assistant for the ECHO companion platform. Extract the main topics discussed in the given conversation. Be precise and list only clearly identifiable topics.",
+  "user_prompt_template": "Extract the main topics from the following conversation. Return them as a JSON array of objects with 'topic' and 'relevance_score' (0-1) fields.\n\nConversation:\n{{conversation_text}}",
+  "variables": {
+    "conversation_text": {
+      "type": "string",
+      "required": true,
+      "description": "The formatted conversation text to extract topics from."
+    }
+  },
+  "defaults": {
+    "temperature": 0.2,
+    "max_tokens": 300
+  },
+  "tags": ["analysis", "topics", "extraction"],
+  "created_at": "2026-03-23T00:00:00Z",
+  "updated_at": "2026-03-23T00:00:00Z"
+}

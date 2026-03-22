@@ -1,8 +1,9 @@
 # AI Generation Service — API Interface Reference
 
-**Version**: 1.0  
-**Last Updated**: 2026-03-23  
-**Maintained by**: AI Generation Service Team
+> **Version**: 2.0.0  
+> **Last Updated**: 2026-03-23  
+> **Maintained by**: AI Generation Service Team  
+> **Architecture Role**: AI Execution Engine + Prompt Template Management
 
 ---
 
@@ -10,34 +11,33 @@
 
 1. [Service Overview](#1-service-overview)
 2. [Access Information](#2-access-information)
-3. [API Endpoints](#3-api-endpoints)
-   - [POST /api/v1/generation/chat-completions](#31-post-apiv1generationchat-completions)
-   - [POST /api/v1/generation/summaries](#32-post-apiv1generationsummaries)
-   - [POST /api/v1/generation/proactive-messages](#33-post-apiv1generationproactive-messages)
-   - [GET /health](#34-get-health)
-   - [GET /ready](#35-get-ready)
-4. [Published Events](#4-published-events)
-   - [ai.generation.failed](#41-aigenerationfailed)
-   - [ai.generation.completed](#42-aigenerationcompleted)
-5. [Error Handling](#5-error-handling)
-6. [Data Models](#6-data-models)
+3. [Template Management APIs](#3-template-management-apis)
+4. [Generation APIs](#4-generation-apis)
+5. [Health and Readiness](#5-health-and-readiness)
+6. [Published Events](#6-published-events)
+7. [Error Handling](#7-error-handling)
+8. [Data Models](#8-data-models)
 
 ---
 
 ## 1. Service Overview
 
-The AI Generation Service provides model-agnostic text generation capabilities for the ECHO platform. It encapsulates all interactions with foundation models (currently Amazon Bedrock / Claude) and exposes a clean internal API for three generation use cases: conversational reply generation, memory summarization, and proactive outreach message drafting.
+The AI Generation Service is a **pure AI execution engine** with **prompt template management**. It does NOT contain business logic or prompt construction. Instead:
 
-The service implements retry logic with exponential backoff and optional fallback to a secondary provider. It publishes telemetry events for monitoring and failure events for incident workflows.
+- **Business callers** assemble core prompt content (variables, conversation messages).
+- **AI Service** manages prompt templates (system-level prompts, variable schemas, default parameters).
+- **AI Service** renders templates with caller-supplied variables and executes them against AI providers.
+- **AI Service** handles retry with exponential backoff, provider fallback, and telemetry event publishing.
+
+The parameter resolution priority chain is: **Caller Config > Template Defaults > Service Defaults**.
 
 **Responsibilities**:
 
-- Handle provider-agnostic chat completion requests
-- Apply provider-specific request transformation and model request shaping
-- Generate summarization outputs for memory compaction workflows
-- Generate proactive outreach message drafts when requested
-- Apply model fallback and timeout retry policies
-- Return usage and generation metadata for observability and governance
+- Manage the lifecycle of prompt templates (register, query, update).
+- Render templates with caller-supplied variables into provider-ready prompts.
+- Execute rendered prompts against AI providers (Amazon Bedrock / Claude primary, OpenAI-compatible fallback).
+- Apply retry and fallback policies transparently.
+- Publish telemetry and failure events for monitoring.
 
 ---
 
@@ -49,9 +49,9 @@ The service implements retry logic with exponential backoff and optional fallbac
 http://<host>:8003
 ```
 
-| Port | Purpose                              |
-|------|--------------------------------------|
-| 8003 | AI Generation Service main API       |
+| Port | Purpose |
+|------|---------|
+| 8003 | AI Generation Service main API |
 
 **Protocol**: HTTP/1.1, JSON request and response bodies, `Content-Type: application/json`.
 
@@ -59,220 +59,252 @@ http://<host>:8003
 
 ---
 
-## 3. API Endpoints
+## 3. Template Management APIs
 
-### 3.1 POST /api/v1/generation/chat-completions
+### 3.1 POST /api/v1/templates — Register a New Template
 
-Generate a conversational reply from a message list including a system prompt.
+Business callers register a new prompt template. The AI service assigns a unique `template_id` and returns it along with the variable schema so the caller knows exactly what to provide at generation time.
 
-**Source**: Conversation Orchestrator Service  
-**Type**: Internal synchronous API call
+**Request Body**:
 
-**Request body**:
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Human-readable template name |
+| `description` | string | No | Detailed description of the template's purpose |
+| `owner` | string | Yes | Service or team registering this template |
+| `category` | string | No | Template category (e.g., `chat`, `summarization`, `proactive`, `analysis`, `safety`) |
+| `system_prompt` | string | Yes | The system-level prompt for this template |
+| `user_prompt_template` | string | Yes | User prompt template with `{{variable}}` placeholders |
+| `variables` | object | No | Schema of variables accepted by this template (see TemplateVariableSchema) |
+| `defaults` | object | No | Default generation parameters (see TemplateDefaults) |
+| `tags` | array | No | Tags for search and filtering |
+
+**Request Example**:
 
 ```json
 {
-  "user_id": "usr_9f2a7c41",
-  "conversation_id": "telegram-chat-123456789",
-  "messages": [
-    {
-      "role": "system",
-      "content": "You are ECHO, a warm and concise companion."
-    },
-    {
-      "role": "user",
-      "content": "Hello ECHO"
+  "name": "Custom Greeting",
+  "owner": "conversation-orchestrator",
+  "category": "chat",
+  "system_prompt": "You are ECHO, a friendly companion.",
+  "user_prompt_template": "Greet the user based on context:\n{{context}}\n\nGenerate a warm greeting.",
+  "variables": {
+    "context": {
+      "type": "string",
+      "required": true,
+      "description": "User context for personalized greeting."
     }
-  ],
-  "generation_config": {
-    "temperature": 0.7,
-    "max_tokens": 200,
+  },
+  "defaults": {
+    "temperature": 0.8,
+    "max_tokens": 100
+  },
+  "tags": ["chat", "greeting"]
+}
+```
+
+**Response** `201 Created`:
+
+```json
+{
+  "template_id": "tpl_custom_greeting_a1b2c3",
+  "name": "Custom Greeting",
+  "version": "1.0.0",
+  "variables": {
+    "context": {
+      "type": "string",
+      "required": true,
+      "default": null,
+      "description": "User context for personalized greeting."
+    }
+  },
+  "defaults": {
+    "temperature": 0.8,
+    "max_tokens": 100,
     "top_p": null,
     "stop_sequences": null
   },
-  "correlation_id": "evt-001"
+  "message": "Template registered successfully."
 }
 ```
 
-| Field              | Type   | Required | Description                                      |
-|--------------------|--------|----------|--------------------------------------------------|
-| `user_id`          | string | yes      | Internal user identifier                         |
-| `conversation_id`  | string | yes      | Conversation identifier                          |
-| `messages`         | array  | yes      | Ordered message list (system + user + assistant)  |
-| `generation_config`| object | no       | Optional generation hyperparameters              |
-| `correlation_id`   | string | no       | Correlation ID for distributed tracing           |
+**Error** `409 Conflict`: A template with the same name and owner already exists.
+
+---
+
+### 3.2 GET /api/v1/templates — List Templates
+
+Returns all registered templates with optional filtering.
+
+**Query Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `category` | string | Filter by category |
+| `owner` | string | Filter by owner |
+| `tag` | string | Filter by tag |
+
+**Response** `200 OK`:
+
+```json
+{
+  "templates": [
+    {
+      "template_id": "tpl_chat_completion",
+      "name": "Chat Completion",
+      "description": "Default system-level wrapper for multi-turn chat completion.",
+      "version": "1.0.0",
+      "owner": "ai-generation-service",
+      "category": "chat",
+      "tags": ["chat", "multi-turn", "default"],
+      "updated_at": "2026-03-23T00:00:00Z"
+    }
+  ],
+  "total": 6
+}
+```
+
+---
+
+### 3.3 GET /api/v1/templates/{template_id} — Get Template by ID
+
+Returns the full template definition including system prompt, user prompt template, variable schema, and default parameters.
+
+**Response** `200 OK`: Full `PromptTemplate` object (see [Data Models](#8-data-models)).
+
+**Response** `404 Not Found`: Template not found.
+
+---
+
+### 3.4 PUT /api/v1/templates/{template_id} — Update a Template
+
+Update an existing template. Only the provided fields are updated. The version is bumped automatically by the AI service.
+
+**Request Body** (all fields optional):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Updated template name |
+| `description` | string | Updated description |
+| `system_prompt` | string | Updated system prompt |
+| `user_prompt_template` | string | Updated user prompt template |
+| `variables` | object | Updated variable schema |
+| `defaults` | object | Updated default generation parameters |
+| `tags` | array | Updated tags |
+
+**Response** `200 OK`: Full updated `PromptTemplate` object.
+
+**Response** `404 Not Found`: Template not found.
+
+---
+
+## 4. Generation APIs
+
+### 4.1 POST /api/v1/generation/execute — Execute Generation (Primary)
+
+The **primary** generation endpoint. Business callers specify a `template_id` and provide variables (or messages for multi-turn chat). The AI service renders the prompt from the template and executes it.
+
+**Request Body**:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `user_id` | string | Yes | Internal user identifier |
+| `conversation_id` | string | No | Conversation identifier for context tracking |
+| `template_id` | string | Yes | The prompt template ID to use |
+| `variables` | object | No | Variable values to substitute into the template |
+| `messages` | array | No | Conversation message list for multi-turn chat templates |
+| `generation_config` | object | No | Override generation parameters |
+| `correlation_id` | string | No | Correlation ID for distributed tracing |
 
 **`generation_config` fields**:
 
-| Field            | Type    | Default | Description                          |
-|------------------|---------|---------|--------------------------------------|
-| `temperature`    | float   | 0.7     | Sampling temperature (0.0–2.0)       |
-| `max_tokens`     | integer | 512     | Maximum tokens to generate (1–4096)  |
-| `top_p`          | float   | null    | Nucleus sampling parameter (0.0–1.0) |
-| `stop_sequences` | array   | null    | Sequences that stop generation       |
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `temperature` | float | (template default) | Sampling temperature (0.0-2.0) |
+| `max_tokens` | integer | (template default) | Maximum tokens to generate (1-4096) |
+| `top_p` | float | null | Nucleus sampling parameter (0.0-1.0) |
+| `stop_sequences` | array | null | Sequences that stop generation |
 
-**Response** `200 OK`:
+**Invocation Patterns**:
 
-```json
-{
-  "response_id": "gen-445",
-  "output": [
-    {
-      "type": "text",
-      "content": "Hey Alice, nice to hear from you."
-    }
-  ],
-  "model": "claude-sonnet",
-  "usage": {
-    "input_tokens": 812,
-    "output_tokens": 39
-  }
-}
-```
-
-| Field         | Type   | Description                              |
-|---------------|--------|------------------------------------------|
-| `response_id` | string | Unique generation response identifier    |
-| `output`      | array  | List of output segments (type + content) |
-| `model`       | string | Model identifier used for generation     |
-| `usage`       | object | Token usage statistics                   |
-
----
-
-### 3.2 POST /api/v1/generation/summaries
-
-Generate a compact summary from a conversation message window for memory compaction.
-
-**Source**: Memory Service  
-**Type**: Internal synchronous API call
-
-**Request body**:
+**Pattern A — Variable-based** (for summarization, proactive, analysis, etc.):
 
 ```json
 {
   "user_id": "usr_9f2a7c41",
-  "conversation_id": "telegram-chat-123456789",
-  "messages_window": {
-    "from_message_id": "msg-601",
-    "to_message_id": "msg-645"
-  },
-  "summary_type": "memory_compaction",
-  "correlation_id": "evt-022"
-}
-```
-
-| Field             | Type   | Required | Description                                    |
-|-------------------|--------|----------|------------------------------------------------|
-| `user_id`         | string | yes      | Internal user identifier                       |
-| `conversation_id` | string | yes      | Conversation identifier                        |
-| `messages_window` | object | yes      | Message ID range to summarize                  |
-| `summary_type`    | string | yes      | Summary type (e.g., `memory_compaction`)        |
-| `correlation_id`  | string | no       | Correlation ID for distributed tracing         |
-
-**Response** `200 OK`:
-
-```json
-{
-  "content": "User values supportive check-ins and tends to exercise in the evening.",
-  "model": "claude-sonnet",
-  "usage": {
-    "input_tokens": 1220,
-    "output_tokens": 57
-  }
-}
-```
-
-| Field     | Type   | Description                          |
-|-----------|--------|--------------------------------------|
-| `content` | string | Generated summary text               |
-| `model`   | string | Model identifier used for generation |
-| `usage`   | object | Token usage statistics               |
-
-> **Note**: This endpoint internally calls the Conversation Persistence Store to retrieve the actual messages within the specified window. See [ASSUMED_INTERFACES.md](./ASSUMED_INTERFACES.md) for the assumed store API.
-
----
-
-### 3.3 POST /api/v1/generation/proactive-messages
-
-Generate a personalized proactive outreach message for re-engagement.
-
-**Source**: Proactive Engagement Service  
-**Type**: Internal synchronous API call
-
-**Request body**:
-
-```json
-{
-  "user_id": "usr_9f2a7c41",
-  "relationship": {
-    "tier": "close_friend",
-    "affinity_score": 0.74,
-    "days_inactive": 3
-  },
-  "context": {
-    "recent_summary": "User enjoys evening workouts and friendly check-ins",
-    "timezone": "Asia/Singapore"
-  },
-  "constraints": {
-    "max_tokens": 120,
-    "tone": "friendly"
+  "template_id": "tpl_proactive_outreach",
+  "variables": {
+    "context_block": "Relationship tier: close_friend\nAffinity score: 0.74\nDays inactive: 3\nTone: warm\nRecent context: User enjoys evening workouts"
   },
   "correlation_id": "evt-6001"
 }
 ```
 
-| Field            | Type   | Required | Description                                |
-|------------------|--------|----------|--------------------------------------------|
-| `user_id`        | string | yes      | Internal user identifier                   |
-| `relationship`   | object | yes      | Current relationship state                 |
-| `context`        | object | no       | Contextual info for personalization        |
-| `constraints`    | object | no       | Generation constraints (tokens, tone)      |
-| `correlation_id` | string | no       | Correlation ID for distributed tracing     |
+**Pattern B — Message-based** (for multi-turn chat):
 
-**`relationship` fields**:
-
-| Field           | Type   | Description                                     |
-|-----------------|--------|-------------------------------------------------|
-| `tier`          | string | acquaintance, friend, close_friend, best_friend |
-| `affinity_score`| float  | 0.0–1.0 affinity score                          |
-| `days_inactive` | int    | Days since last user interaction                 |
-
-**`context` fields**:
-
-| Field           | Type   | Description                          |
-|-----------------|--------|--------------------------------------|
-| `recent_summary`| string | Recent memory summary for the user   |
-| `timezone`      | string | User timezone (IANA format)          |
-
-**`constraints` fields**:
-
-| Field       | Type   | Default    | Description                      |
-|-------------|--------|------------|----------------------------------|
-| `max_tokens`| int    | 120        | Maximum tokens for the message   |
-| `tone`      | string | "friendly" | Desired tone of the message      |
+```json
+{
+  "user_id": "usr_9f2a7c41",
+  "conversation_id": "telegram-chat-123456789",
+  "template_id": "tpl_chat_completion",
+  "messages": [
+    {"role": "system", "content": "You are ECHO, a warm companion. The user likes hiking."},
+    {"role": "user", "content": "Hey ECHO, any trail suggestions?"},
+    {"role": "assistant", "content": "Sure! What difficulty level are you looking for?"},
+    {"role": "user", "content": "Something moderate, about 2 hours."}
+  ],
+  "generation_config": {
+    "temperature": 0.7,
+    "max_tokens": 300
+  }
+}
+```
 
 **Response** `200 OK`:
 
 ```json
 {
-  "response_id": "gen-980",
+  "response_id": "gen-a1b2c3d4e5f6",
+  "template_id": "tpl_proactive_outreach",
   "output": [
     {
       "type": "text",
-      "content": "Hey Alice, just checking in—how has your week been so far?"
+      "content": "Hey! It's been a few days — hope your workouts are going well."
     }
   ],
   "model": "claude-sonnet",
   "usage": {
-    "input_tokens": 532,
-    "output_tokens": 26
+    "input_tokens": 156,
+    "output_tokens": 32
   }
 }
 ```
 
 ---
 
-### 3.4 GET /health
+### 4.2 Legacy Endpoints (Deprecated)
+
+The following endpoints are maintained for backward compatibility. **New integrations should use `/execute` instead.** All legacy endpoints now accept an optional `template_id` field.
+
+#### POST /api/v1/generation/chat-completions
+
+Accepts a conversation message list and returns an AI-generated reply. If `template_id` is omitted, uses `tpl_chat_completion`.
+
+#### POST /api/v1/generation/summaries
+
+Accepts a message window reference and generates a compact summary. If `template_id` is omitted, uses `tpl_memory_compaction`.
+
+#### POST /api/v1/generation/proactive-messages
+
+Accepts relationship context and generates a personalized check-in message. If `template_id` is omitted, uses `tpl_proactive_outreach`.
+
+> See the v1.0 API documentation or the Swagger UI for detailed legacy endpoint schemas.
+
+---
+
+## 5. Health and Readiness
+
+### GET /health
 
 Basic liveness check.
 
@@ -281,13 +313,12 @@ Basic liveness check.
 ```json
 {
   "status": "healthy",
-  "service": "ai-generation-service"
+  "service": "ai-generation-service",
+  "version": "2.0.0"
 }
 ```
 
----
-
-### 3.5 GET /ready
+### GET /ready
 
 Readiness check verifying the service can accept requests.
 
@@ -302,156 +333,123 @@ Readiness check verifying the service can accept requests.
 
 ---
 
-## 4. Published Events
+## 6. Published Events
 
-The AI Generation Service publishes the following events to the Internal Asynchronous Messaging Layer for monitoring and telemetry purposes.
+The AI Generation Service publishes the following events to the Internal Asynchronous Messaging Layer.
 
-### 4.1 ai.generation.failed
+### 6.1 ai.generation.completed
+
+Published after every successful generation for telemetry and monitoring.
+
+```json
+{
+  "event_id": "evt-a1b2c3d4e5f6",
+  "event_type": "ai.generation.completed",
+  "schema_version": "1.0",
+  "timestamp": "2026-03-23T15:10:03Z",
+  "user_id": "usr_9f2a7c41",
+  "operation": "execute:tpl_proactive_outreach",
+  "model": "claude-sonnet",
+  "usage": {
+    "input_tokens": 156,
+    "output_tokens": 32
+  },
+  "correlation_id": "evt-6001"
+}
+```
+
+### 6.2 ai.generation.failed
 
 Published when a generation request fails after all retry and fallback attempts.
 
-**Topic**: `ai.generation.failed`
-
 ```json
 {
-  "event_id": "evt-6002",
-  "correlation_id": "evt-001",
+  "event_id": "evt-b2c3d4e5f6a7",
   "event_type": "ai.generation.failed",
   "schema_version": "1.0",
-  "timestamp": "2026-03-11T15:10:03Z",
+  "timestamp": "2026-03-23T15:10:03Z",
   "user_id": "usr_9f2a7c41",
-  "operation": "chat_completion",
+  "operation": "execute:tpl_chat_completion",
   "error_code": "PROVIDER_TIMEOUT",
   "retryable": true,
-  "fallback_attempted": true
-}
-```
-
-| Field               | Type    | Description                                                |
-|---------------------|---------|------------------------------------------------------------|
-| `event_id`          | string  | Unique event identifier                                    |
-| `correlation_id`    | string  | Correlation ID from the original request                   |
-| `event_type`        | string  | Always `ai.generation.failed`                              |
-| `schema_version`    | string  | Schema version for forward compatibility                   |
-| `timestamp`         | string  | ISO 8601 timestamp of the failure                          |
-| `user_id`           | string  | Internal user identifier                                   |
-| `operation`         | string  | `chat_completion`, `summary_generation`, or `proactive_message` |
-| `error_code`        | string  | `PROVIDER_TIMEOUT`, `PROVIDER_ERROR`, `CONVERSATION_STORE_UNAVAILABLE` |
-| `retryable`         | boolean | Whether the failure is retryable                           |
-| `fallback_attempted`| boolean | Whether a fallback provider was attempted                  |
-
----
-
-### 4.2 ai.generation.completed
-
-Published for telemetry, monitoring, and audit trails only. This is NOT a second business response path.
-
-**Topic**: `ai.generation.completed`
-
-```json
-{
-  "event_id": "evt-6003",
-  "correlation_id": "evt-022",
-  "event_type": "ai.generation.completed",
-  "schema_version": "1.0",
-  "timestamp": "2026-03-11T15:10:06Z",
-  "user_id": "usr_9f2a7c41",
-  "operation": "summary_generation",
-  "model": "claude-sonnet",
-  "usage": {
-    "input_tokens": 1220,
-    "output_tokens": 57
-  }
-}
-```
-
-| Field            | Type   | Description                                                |
-|------------------|--------|------------------------------------------------------------|
-| `event_id`       | string | Unique event identifier                                    |
-| `correlation_id` | string | Correlation ID from the original request                   |
-| `event_type`     | string | Always `ai.generation.completed`                           |
-| `schema_version` | string | Schema version for forward compatibility                   |
-| `timestamp`      | string | ISO 8601 timestamp of completion                           |
-| `user_id`        | string | Internal user identifier                                   |
-| `operation`      | string | `chat_completion`, `summary_generation`, or `proactive_message` |
-| `model`          | string | Model identifier used                                      |
-| `usage`          | object | Token usage: `{input_tokens, output_tokens}`               |
-
----
-
-## 5. Error Handling
-
-### HTTP Status Codes
-
-| Status | Meaning                                                          |
-|--------|------------------------------------------------------------------|
-| 200    | Success                                                          |
-| 422    | Validation error — request body failed schema validation         |
-| 500    | Internal error — non-retryable provider or system failure        |
-| 503    | Service unavailable — retryable provider failure (timeout, etc.) |
-
-### Error Response Format
-
-```json
-{
-  "error_code": "PROVIDER_TIMEOUT",
-  "message": "AI provider did not respond within the configured timeout.",
-  "retryable": true,
+  "fallback_attempted": true,
   "correlation_id": "evt-001"
 }
 ```
 
-### Error Codes
+---
 
-| Code                             | Retryable | Description                                    |
-|----------------------------------|-----------|------------------------------------------------|
-| `PROVIDER_TIMEOUT`               | yes       | AI provider did not respond in time            |
-| `PROVIDER_ERROR`                 | no        | AI provider returned an unrecoverable error    |
-| `CONVERSATION_STORE_UNAVAILABLE` | yes       | Failed to retrieve messages for summarization  |
-| `INTERNAL_ERROR`                 | no        | Unexpected internal error                      |
+## 7. Error Handling
+
+| HTTP Status | Error Code | Description | Retryable |
+|-------------|------------|-------------|-----------|
+| 400 | `TEMPLATE_RENDER_ERROR` | Template not found or variable validation failed | No |
+| 409 | (Conflict) | Duplicate template name+owner on registration | No |
+| 422 | (Validation Error) | Request body validation failed | No |
+| 500 | `PROVIDER_ERROR` | AI provider returned an error after all retries | No |
+| 500 | `INTERNAL_ERROR` | Unexpected server error | No |
+| 503 | `PROVIDER_TIMEOUT` | AI provider timed out after all retries | Yes |
+
+**Error Response Body**:
+
+```json
+{
+  "error_code": "TEMPLATE_RENDER_ERROR",
+  "message": "Missing required variables for template 'tpl_proactive_outreach': context_block",
+  "retryable": false,
+  "correlation_id": "evt-6001"
+}
+```
 
 ---
 
-## 6. Data Models
+## 8. Data Models
 
-### MessageItem
+### PromptTemplate
 
-```json
-{
-  "role": "user",
-  "content": "Hello ECHO"
-}
-```
+| Field | Type | Description |
+|-------|------|-------------|
+| `template_id` | string | Unique template identifier (assigned on registration) |
+| `name` | string | Human-readable name |
+| `description` | string | Detailed description |
+| `version` | string | Semantic version (auto-bumped on update) |
+| `owner` | string | Owning service or team |
+| `category` | string | Category for organization |
+| `system_prompt` | string | System-level prompt managed by the AI service |
+| `user_prompt_template` | string | User prompt with `{{variable}}` placeholders |
+| `variables` | object | Variable schema (name -> TemplateVariableSchema) |
+| `defaults` | TemplateDefaults | Default generation parameters |
+| `tags` | array | Tags for filtering |
+| `created_at` | datetime | Creation timestamp (ISO 8601) |
+| `updated_at` | datetime | Last update timestamp (ISO 8601) |
 
-| Field   | Type   | Description                               |
-|---------|--------|-------------------------------------------|
-| `role`  | string | `system`, `user`, or `assistant`          |
-| `content`| string | Text content of the message              |
+### TemplateVariableSchema
 
-### OutputItem
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | Variable data type: `string`, `number`, `boolean`, `object` |
+| `required` | boolean | Whether the variable must be provided at generation time |
+| `default` | any | Default value for optional variables |
+| `description` | string | Human-readable description |
 
-```json
-{
-  "type": "text",
-  "content": "Hey Alice, nice to hear from you."
-}
-```
+### TemplateDefaults
 
-| Field    | Type   | Description                    |
-|----------|--------|--------------------------------|
-| `type`   | string | Output type (currently `text`) |
-| `content`| string | Generated text content         |
+| Field | Type | Description |
+|-------|------|-------------|
+| `temperature` | float | Default sampling temperature (0.0-2.0) |
+| `max_tokens` | int | Default max tokens (1-4096) |
+| `top_p` | float | Default nucleus sampling (0.0-1.0) |
+| `stop_sequences` | array | Default stop sequences |
 
-### UsageInfo
+### Preset Templates
 
-```json
-{
-  "input_tokens": 812,
-  "output_tokens": 39
-}
-```
+The following templates are pre-loaded on service startup:
 
-| Field          | Type | Description                      |
-|----------------|------|----------------------------------|
-| `input_tokens` | int  | Number of input tokens consumed  |
-| `output_tokens`| int  | Number of output tokens generated|
+| Template ID | Name | Category | Variables | Default Temp | Default Max Tokens |
+|-------------|------|----------|-----------|-------------|-------------------|
+| `tpl_chat_completion` | Chat Completion | chat | `user_prompt` | 0.7 | 512 |
+| `tpl_memory_compaction` | Memory Compaction Summary | summarization | `summary_type`, `conversation_text` | 0.3 | 300 |
+| `tpl_proactive_outreach` | Proactive Outreach Message | proactive | `context_block` | 0.8 | 150 |
+| `tpl_sentiment_analysis` | Sentiment Analysis | analysis | `text`, `output_format` (opt) | 0.2 | 200 |
+| `tpl_topic_extraction` | Topic Extraction | analysis | `conversation_text` | 0.2 | 300 |
+| `tpl_safety_filter` | Safety Content Filter | safety | `content` | 0.0 | 200 |
