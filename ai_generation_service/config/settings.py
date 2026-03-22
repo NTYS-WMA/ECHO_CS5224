@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # Service identity
     SERVICE_NAME: str = "ai-generation-service"
-    SERVICE_VERSION: str = "1.0.0"
+    SERVICE_VERSION: str = "2.0.0"
     HOST: str = "0.0.0.0"
     PORT: int = 8003
 
@@ -32,13 +32,19 @@ class Settings(BaseSettings):
     FALLBACK_API_KEY: Optional[str] = None
     FALLBACK_MODEL_ID: Optional[str] = None
 
-    # Default generation parameters
+    # Default generation parameters (service-level fallbacks)
+    # These are used only when neither the caller nor the template provides values.
     DEFAULT_TEMPERATURE: float = 0.7
     DEFAULT_MAX_TOKENS: int = 512
     SUMMARY_TEMPERATURE: float = 0.3
     SUMMARY_MAX_TOKENS: int = 300
     PROACTIVE_TEMPERATURE: float = 0.8
     PROACTIVE_MAX_TOKENS: int = 150
+
+    # Prompt template management
+    # Templates directory path is auto-resolved relative to the package,
+    # but can be overridden for custom deployments.
+    TEMPLATES_DIR_OVERRIDE: Optional[str] = None
 
     # Event broker configuration
     # TO BE UPDATED: Actual broker implementation details (e.g., Redis Streams, RabbitMQ, or local queue)

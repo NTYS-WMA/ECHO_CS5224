@@ -172,9 +172,17 @@ GET /api/v1/users/{user_id}/profile
 **Owner**: AI Generation Service Team  
 **Status**: Defined (see `ai_generation_service/API_INTERFACES.md`)
 
-The Proactive Engagement Service calls this endpoint to request AI-generated proactive outreach messages.
+The Proactive Engagement Service calls the AI Generation Service to request AI-generated proactive outreach messages.
 
-**Endpoint**:
+**Primary Endpoint (v2.0 — recommended)**:
+
+```
+POST /api/v1/generation/execute
+```
+
+Using `template_id: "tpl_proactive_outreach"` with the `context_block` variable assembled by the Proactive Engagement Service.
+
+**Legacy Endpoint (deprecated)**:
 
 ```
 POST /api/v1/generation/proactive-messages
@@ -182,13 +190,14 @@ POST /api/v1/generation/proactive-messages
 
 **Base URL**: Configured via `PROACTIVE_AI_GENERATION_SERVICE_BASE_URL` environment variable.
 
-**Request and response schemas**: See [AI Generation Service API_INTERFACES.md](../ai_generation_service/API_INTERFACES.md#33-post-apiv1generationproactive-messages).
+**Request and response schemas**: See [AI Generation Service API_INTERFACES.md](../ai_generation_service/API_INTERFACES.md).
 
 **Notes**:
 
 - This is the only dependency that is formally defined within this project.
 - The AI Generation Service may return 503 (retryable) or 500 (non-retryable) errors.
 - On failure, the candidate is marked as `generation_failed` and skipped.
+- The Proactive Engagement Service is responsible for assembling the `context_block` variable from relationship data, user profile, and memory summaries.
 
 ---
 

@@ -1,19 +1,26 @@
 """
-Core generation service orchestrating AI provider calls with retry and fallback.
+Core generation service — the AI execution engine.
 
-This service is the central business logic layer of the AI Generation Service.
-It handles:
-- Chat completion requests from the Conversation Orchestrator.
-- Summary generation requests from the Memory Service.
-- Proactive message generation requests from the Proactive Engagement Service.
-- Retry logic with exponential backoff.
-- Fallback to a secondary provider on primary failure.
-- Event publishing for telemetry and failure monitoring.
+This service is the central execution layer of the AI Generation Service.
+It does NOT contain business logic or prompt construction. Instead it:
+- Accepts template-rendered messages from the TemplateRenderer.
+- Invokes AI providers with retry and fallback.
+- Publishes telemetry events.
+
+The prompt assembly responsibility is split:
+- **Business callers** assemble the core prompt content (variables).
+- **TemplateRenderer** renders templates with those variables.
+- **GenerationService** executes the rendered prompt against AI providers.
+
+Supported invocation patterns:
+1. Template-based: template_id + variables -> render -> execute
+2. Multi-turn chat: template_id + messages -> merge system prompt -> execute
+3. Legacy endpoints: backward-compatible wrappers that map to pattern 1 or 2.
 """
 
 import asyncio
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from ..config.settings import Settings
 from ..events.publisher import EventPublisher
@@ -21,10 +28,11 @@ from ..models.requests import (
     ChatCompletionRequest,
     ProactiveMessageRequest,
     SummaryGenerationRequest,
+    TemplateGenerationRequest,
 )
 from ..models.responses import (
     ChatCompletionResponse,
-    ErrorResponse,
+    GenerationResponse,
     OutputItem,
     ProactiveMessageResponse,
     SummaryGenerationResponse,
@@ -32,15 +40,20 @@ from ..models.responses import (
 )
 from ..utils.helpers import generate_event_id, generate_response_id
 from .conversation_store_client import ConversationStoreClient
-from .prompt_builder import PromptBuilder
 from .provider_base import AIProviderBase, ProviderError, ProviderTimeoutError
+from .template_renderer import TemplateRenderer, TemplateRenderError
 
 logger = logging.getLogger(__name__)
+
+# Default template IDs for legacy endpoints
+DEFAULT_CHAT_TEMPLATE = "tpl_chat_completion"
+DEFAULT_SUMMARY_TEMPLATE = "tpl_memory_compaction"
+DEFAULT_PROACTIVE_TEMPLATE = "tpl_proactive_outreach"
 
 
 class GenerationService:
     """
-    Core service that processes generation requests with retry and fallback.
+    Core AI execution engine with retry, fallback, and telemetry.
     """
 
     def __init__(
@@ -49,6 +62,7 @@ class GenerationService:
         fallback_provider: Optional[AIProviderBase],
         event_publisher: EventPublisher,
         conversation_store: ConversationStoreClient,
+        template_renderer: TemplateRenderer,
         settings: Settings,
     ):
         """
@@ -59,46 +73,148 @@ class GenerationService:
             fallback_provider: Optional fallback AI provider.
             event_publisher: Event publisher for telemetry and failure events.
             conversation_store: Client for retrieving conversation messages.
+            template_renderer: Renderer for prompt templates.
             settings: Service configuration.
         """
         self._primary = primary_provider
         self._fallback = fallback_provider
         self._events = event_publisher
         self._conversation_store = conversation_store
+        self._renderer = template_renderer
         self._settings = settings
 
-    # ------------------------------------------------------------------ #
-    # Chat Completion
-    # ------------------------------------------------------------------ #
+    # ================================================================== #
+    # PRIMARY INTERFACE: Template-based generation
+    # ================================================================== #
+
+    async def execute(
+        self, request: TemplateGenerationRequest
+    ) -> GenerationResponse:
+        """
+        Execute a generation request using a prompt template.
+
+        This is the primary generation interface. The caller specifies a
+        template_id and provides variables (or messages for multi-turn chat).
+        The service renders the template and executes it.
+
+        Args:
+            request: The template-based generation request.
+
+        Returns:
+            GenerationResponse with generated text and usage info.
+
+        Raises:
+            GenerationError: If rendering or all provider attempts fail.
+        """
+        template_id = request.template_id
+
+        try:
+            # Determine rendering mode
+            if request.messages:
+                # Multi-turn chat mode: merge template system prompt with messages
+                messages, defaults = self._renderer.render_with_messages(
+                    template_id=template_id,
+                    messages=[m.model_dump() for m in request.messages],
+                )
+            else:
+                # Variable-based mode: render template with variables
+                messages, defaults = self._renderer.render(
+                    template_id=template_id,
+                    variables=request.variables,
+                )
+        except TemplateRenderError as e:
+            raise GenerationError(
+                error_code="TEMPLATE_RENDER_ERROR",
+                message=str(e),
+                retryable=False,
+            )
+
+        # Resolve generation parameters: caller config > template defaults > service defaults
+        temperature = self._resolve_param(
+            request.generation_config.temperature if request.generation_config else None,
+            defaults.temperature if defaults else None,
+            self._settings.DEFAULT_TEMPERATURE,
+        )
+        max_tokens = self._resolve_param(
+            request.generation_config.max_tokens if request.generation_config else None,
+            defaults.max_tokens if defaults else None,
+            self._settings.DEFAULT_MAX_TOKENS,
+        )
+        stop_sequences = (
+            request.generation_config.stop_sequences
+            if request.generation_config
+            else (defaults.stop_sequences if defaults else None)
+        )
+
+        provider_response = await self._invoke_with_retry_and_fallback(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stop_sequences=stop_sequences,
+            operation=f"execute:{template_id}",
+            user_id=request.user_id,
+            correlation_id=request.correlation_id,
+        )
+
+        response = GenerationResponse(
+            response_id=generate_response_id(),
+            template_id=template_id,
+            output=[OutputItem(type="text", content=provider_response.content)],
+            model=provider_response.model,
+            usage=UsageInfo(
+                input_tokens=provider_response.input_tokens,
+                output_tokens=provider_response.output_tokens,
+            ),
+        )
+
+        await self._publish_completed_event(
+            operation=f"execute:{template_id}",
+            user_id=request.user_id,
+            model=provider_response.model,
+            usage={
+                "input_tokens": provider_response.input_tokens,
+                "output_tokens": provider_response.output_tokens,
+            },
+            correlation_id=request.correlation_id,
+        )
+
+        return response
+
+    # ================================================================== #
+    # LEGACY INTERFACES (backward compatibility)
+    # ================================================================== #
 
     async def chat_completion(
         self, request: ChatCompletionRequest
     ) -> ChatCompletionResponse:
         """
-        Handle a chat completion request from the Conversation Orchestrator.
+        Handle a chat completion request (legacy endpoint).
 
-        Args:
-            request: The chat completion request.
-
-        Returns:
-            ChatCompletionResponse with generated text and usage info.
-
-        Raises:
-            GenerationError: If all providers fail after retries.
+        Maps to the template-based execution engine using the chat template.
         """
-        messages = PromptBuilder.build_chat_completion_messages(
-            [m.model_dump() for m in request.messages]
-        )
+        template_id = request.template_id or DEFAULT_CHAT_TEMPLATE
 
-        temperature = (
-            request.generation_config.temperature
-            if request.generation_config and request.generation_config.temperature is not None
-            else self._settings.DEFAULT_TEMPERATURE
+        try:
+            messages, defaults = self._renderer.render_with_messages(
+                template_id=template_id,
+                messages=[m.model_dump() for m in request.messages],
+            )
+        except TemplateRenderError as e:
+            raise GenerationError(
+                error_code="TEMPLATE_RENDER_ERROR",
+                message=str(e),
+                retryable=False,
+            )
+
+        temperature = self._resolve_param(
+            request.generation_config.temperature if request.generation_config else None,
+            defaults.temperature if defaults else None,
+            self._settings.DEFAULT_TEMPERATURE,
         )
-        max_tokens = (
-            request.generation_config.max_tokens
-            if request.generation_config and request.generation_config.max_tokens is not None
-            else self._settings.DEFAULT_MAX_TOKENS
+        max_tokens = self._resolve_param(
+            request.generation_config.max_tokens if request.generation_config else None,
+            defaults.max_tokens if defaults else None,
+            self._settings.DEFAULT_MAX_TOKENS,
         )
         stop_sequences = (
             request.generation_config.stop_sequences
@@ -126,7 +242,6 @@ class GenerationService:
             ),
         )
 
-        # Publish telemetry event
         await self._publish_completed_event(
             operation="chat_completion",
             user_id=request.user_id,
@@ -140,30 +255,14 @@ class GenerationService:
 
         return response
 
-    # ------------------------------------------------------------------ #
-    # Summary Generation
-    # ------------------------------------------------------------------ #
-
     async def generate_summary(
         self, request: SummaryGenerationRequest
     ) -> SummaryGenerationResponse:
         """
-        Handle a summary generation request from the Memory Service.
+        Handle a summary generation request (legacy endpoint).
 
-        Retrieves the conversation messages from the Conversation Persistence
-        Store, builds a summarization prompt, and invokes the AI provider.
-
-        Args:
-            request: The summary generation request.
-
-        Returns:
-            SummaryGenerationResponse with the generated summary.
-
-        Raises:
-            GenerationError: If all providers fail after retries.
+        Retrieves conversation messages, then maps to template-based execution.
         """
-        # Retrieve conversation messages for the specified window
-        # TO BE UPDATED: Error handling for conversation store failures
         try:
             conversation_messages = (
                 await self._conversation_store.get_messages_by_window(
@@ -177,22 +276,50 @@ class GenerationService:
                 "Failed to retrieve conversation messages for summarization: %s",
                 str(e),
             )
-            # If we cannot retrieve messages, we cannot summarize.
             raise GenerationError(
                 error_code="CONVERSATION_STORE_UNAVAILABLE",
                 message=f"Failed to retrieve conversation messages: {str(e)}",
                 retryable=True,
             )
 
-        messages = PromptBuilder.build_summary_messages(
-            conversation_messages=conversation_messages,
-            summary_type=request.summary_type,
+        # Format conversation for the template variable
+        conversation_text = "\n".join(
+            f"[{msg.get('role', 'unknown')}]: {msg.get('content', '')}"
+            for msg in conversation_messages
+        )
+
+        template_id = request.template_id or DEFAULT_SUMMARY_TEMPLATE
+
+        try:
+            messages, defaults = self._renderer.render(
+                template_id=template_id,
+                variables={
+                    "summary_type": request.summary_type,
+                    "conversation_text": conversation_text,
+                },
+            )
+        except TemplateRenderError as e:
+            raise GenerationError(
+                error_code="TEMPLATE_RENDER_ERROR",
+                message=str(e),
+                retryable=False,
+            )
+
+        temperature = self._resolve_param(
+            None,
+            defaults.temperature if defaults else None,
+            self._settings.SUMMARY_TEMPERATURE,
+        )
+        max_tokens = self._resolve_param(
+            None,
+            defaults.max_tokens if defaults else None,
+            self._settings.SUMMARY_MAX_TOKENS,
         )
 
         provider_response = await self._invoke_with_retry_and_fallback(
             messages=messages,
-            temperature=self._settings.SUMMARY_TEMPERATURE,
-            max_tokens=self._settings.SUMMARY_MAX_TOKENS,
+            temperature=temperature,
+            max_tokens=max_tokens,
             stop_sequences=None,
             operation="summary_generation",
             user_id=request.user_id,
@@ -208,7 +335,6 @@ class GenerationService:
             ),
         )
 
-        # Publish telemetry event
         await self._publish_completed_event(
             operation="summary_generation",
             user_id=request.user_id,
@@ -222,50 +348,58 @@ class GenerationService:
 
         return response
 
-    # ------------------------------------------------------------------ #
-    # Proactive Message Generation
-    # ------------------------------------------------------------------ #
-
     async def generate_proactive_message(
         self, request: ProactiveMessageRequest
     ) -> ProactiveMessageResponse:
         """
-        Handle a proactive message generation request from the Proactive
-        Engagement Service.
+        Handle a proactive message generation request (legacy endpoint).
 
-        Args:
-            request: The proactive message generation request.
-
-        Returns:
-            ProactiveMessageResponse with the generated outreach message.
-
-        Raises:
-            GenerationError: If all providers fail after retries.
+        Assembles the context block and maps to template-based execution.
         """
-        messages = PromptBuilder.build_proactive_messages(
-            relationship_tier=request.relationship.tier,
-            affinity_score=request.relationship.affinity_score,
-            days_inactive=request.relationship.days_inactive,
-            recent_summary=(
-                request.context.recent_summary if request.context else None
-            ),
-            timezone=request.context.timezone if request.context else None,
-            tone=(
-                request.constraints.tone
-                if request.constraints and request.constraints.tone
-                else "friendly"
-            ),
-        )
+        # Build context block — this is the business-layer assembly that
+        # will eventually move to the Proactive Engagement Service caller
+        context_parts = [
+            f"Relationship tier: {request.relationship.tier}",
+            f"Affinity score: {request.relationship.affinity_score:.2f}",
+            f"Days since last interaction: {request.relationship.days_inactive}",
+            f"Desired tone: {request.constraints.tone if request.constraints and request.constraints.tone else 'friendly'}",
+        ]
+        if request.context and request.context.timezone:
+            context_parts.append(f"User timezone: {request.context.timezone}")
+        if request.context and request.context.recent_summary:
+            context_parts.append(
+                f"Recent context about the user: {request.context.recent_summary}"
+            )
+        context_block = "\n".join(context_parts)
 
-        max_tokens = (
-            request.constraints.max_tokens
-            if request.constraints and request.constraints.max_tokens
-            else self._settings.PROACTIVE_MAX_TOKENS
+        template_id = request.template_id or DEFAULT_PROACTIVE_TEMPLATE
+
+        try:
+            messages, defaults = self._renderer.render(
+                template_id=template_id,
+                variables={"context_block": context_block},
+            )
+        except TemplateRenderError as e:
+            raise GenerationError(
+                error_code="TEMPLATE_RENDER_ERROR",
+                message=str(e),
+                retryable=False,
+            )
+
+        max_tokens = self._resolve_param(
+            request.constraints.max_tokens if request.constraints else None,
+            defaults.max_tokens if defaults else None,
+            self._settings.PROACTIVE_MAX_TOKENS,
+        )
+        temperature = self._resolve_param(
+            None,
+            defaults.temperature if defaults else None,
+            self._settings.PROACTIVE_TEMPERATURE,
         )
 
         provider_response = await self._invoke_with_retry_and_fallback(
             messages=messages,
-            temperature=self._settings.PROACTIVE_TEMPERATURE,
+            temperature=temperature,
             max_tokens=max_tokens,
             stop_sequences=None,
             operation="proactive_message",
@@ -283,7 +417,6 @@ class GenerationService:
             ),
         )
 
-        # Publish telemetry event
         await self._publish_completed_event(
             operation="proactive_message",
             user_id=request.user_id,
@@ -297,9 +430,9 @@ class GenerationService:
 
         return response
 
-    # ------------------------------------------------------------------ #
+    # ================================================================== #
     # Retry and Fallback Logic
-    # ------------------------------------------------------------------ #
+    # ================================================================== #
 
     async def _invoke_with_retry_and_fallback(
         self,
@@ -314,15 +447,6 @@ class GenerationService:
         """
         Invoke the primary provider with retry, then fall back if configured.
 
-        Args:
-            messages: Provider-ready message list.
-            temperature: Sampling temperature.
-            max_tokens: Maximum tokens.
-            stop_sequences: Optional stop sequences.
-            operation: Operation name for logging and events.
-            user_id: User ID for event publishing.
-            correlation_id: Correlation ID for tracing.
-
         Returns:
             ProviderResponse from whichever provider succeeds.
 
@@ -332,7 +456,6 @@ class GenerationService:
         last_error = None
         fallback_attempted = False
 
-        # Try primary provider with retries
         for attempt in range(1, self._settings.MAX_RETRY_ATTEMPTS + 1):
             try:
                 logger.info(
@@ -354,7 +477,9 @@ class GenerationService:
                     "Primary provider timeout on attempt %d: %s", attempt, str(e)
                 )
                 if attempt < self._settings.MAX_RETRY_ATTEMPTS:
-                    backoff = self._settings.RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+                    backoff = self._settings.RETRY_BACKOFF_BASE_SECONDS * (
+                        2 ** (attempt - 1)
+                    )
                     await asyncio.sleep(backoff)
             except ProviderError as e:
                 last_error = e
@@ -362,13 +487,20 @@ class GenerationService:
                     "Primary provider error on attempt %d: %s", attempt, str(e)
                 )
                 if attempt < self._settings.MAX_RETRY_ATTEMPTS:
-                    backoff = self._settings.RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+                    backoff = self._settings.RETRY_BACKOFF_BASE_SECONDS * (
+                        2 ** (attempt - 1)
+                    )
                     await asyncio.sleep(backoff)
 
-        # Try fallback provider if configured
         if self._fallback and (
-            (isinstance(last_error, ProviderTimeoutError) and self._settings.FALLBACK_ON_TIMEOUT)
-            or (isinstance(last_error, ProviderError) and self._settings.FALLBACK_ON_PROVIDER_ERROR)
+            (
+                isinstance(last_error, ProviderTimeoutError)
+                and self._settings.FALLBACK_ON_TIMEOUT
+            )
+            or (
+                isinstance(last_error, ProviderError)
+                and self._settings.FALLBACK_ON_PROVIDER_ERROR
+            )
         ):
             fallback_attempted = True
             try:
@@ -387,7 +519,6 @@ class GenerationService:
                 last_error = e
                 logger.error("Fallback provider also failed: %s", str(e))
 
-        # All attempts exhausted — publish failure event and raise
         error_code = (
             "PROVIDER_TIMEOUT"
             if isinstance(last_error, ProviderTimeoutError)
@@ -409,9 +540,25 @@ class GenerationService:
             retryable=isinstance(last_error, ProviderTimeoutError),
         )
 
-    # ------------------------------------------------------------------ #
+    # ================================================================== #
+    # Parameter Resolution
+    # ================================================================== #
+
+    @staticmethod
+    def _resolve_param(caller_value, template_default, service_default):
+        """
+        Resolve a generation parameter using the priority chain:
+        caller config > template default > service default.
+        """
+        if caller_value is not None:
+            return caller_value
+        if template_default is not None:
+            return template_default
+        return service_default
+
+    # ================================================================== #
     # Event Publishing Helpers
-    # ------------------------------------------------------------------ #
+    # ================================================================== #
 
     async def _publish_completed_event(
         self,
@@ -461,7 +608,7 @@ class GenerationService:
 
 
 class GenerationError(Exception):
-    """Raised when all generation attempts fail."""
+    """Raised when generation fails (rendering, provider, or exhausted retries)."""
 
     def __init__(self, error_code: str, message: str, retryable: bool):
         super().__init__(message)
