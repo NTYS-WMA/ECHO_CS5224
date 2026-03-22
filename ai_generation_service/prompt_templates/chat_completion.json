@@ -1,0 +1,24 @@
+{
+  "template_id": "tpl_chat_completion",
+  "name": "Chat Completion",
+  "description": "Default system-level wrapper for multi-turn chat completion. Business callers supply the full conversation messages; this template only provides the system-level safety and identity preamble.",
+  "version": "1.0.0",
+  "owner": "ai-generation-service",
+  "category": "chat",
+  "system_prompt": "You are ECHO, an AI companion on the ECHO platform. Follow the instructions given by the business layer precisely. Always respond in the language the user is speaking. Be helpful, concise, and respectful. Do not fabricate facts. If you are unsure, say so.",
+  "user_prompt_template": "{{user_prompt}}",
+  "variables": {
+    "user_prompt": {
+      "type": "string",
+      "required": true,
+      "description": "The full user-facing prompt assembled by the business layer."
+    }
+  },
+  "defaults": {
+    "temperature": 0.7,
+    "max_tokens": 512
+  },
+  "tags": ["chat", "multi-turn", "default"],
+  "created_at": "2026-03-23T00:00:00Z",
+  "updated_at": "2026-03-23T00:00:00Z"
+}

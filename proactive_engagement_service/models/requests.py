@@ -1,103 +1,76 @@
 """
-Request models for the Proactive Engagement Service.
+Request models for the Proactive Engagement Service v2.0.
 
-Includes event payloads consumed from the messaging layer and request
-bodies for internal API calls to dependent services.
+Includes request bodies for task registration, update, listing,
+and scheduler control endpoints.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from .domain import ScheduleConfig, TaskPayload, TaskType
 
-class ProactiveScanTriggerEvent(BaseModel):
+
+# ------------------------------------------------------------------ #
+# Task CRUD Requests
+# ------------------------------------------------------------------ #
+
+
+class RegisterTaskRequest(BaseModel):
     """
-    Event consumed from topic: proactive.scan.requested
+    Request body for POST /api/v1/tasks — Register a new scheduled task.
 
-    Published by the platform scheduler to trigger a proactive engagement scan.
+    The caller (service registrant) provides the target, payload, and
+    schedule configuration. The Proactive Engagement Service computes
+    next_run_at and persists the task via the Database Service.
     """
 
-    event_id: str = Field(
+    owner_service: str = Field(
         ...,
-        description="Unique event identifier.",
-        examples=["evt-7001"],
+        description="Name of the service registering this task.",
+        examples=["conversation-orchestrator", "relationship-service"],
     )
-    event_type: str = Field(
-        default="proactive.scan.requested",
-        description="Event type discriminator.",
-    )
-    schema_version: str = Field(
-        default="1.0",
-        description="Schema version for forward compatibility.",
-    )
-    timestamp: datetime = Field(
+    task_type: TaskType = Field(
         ...,
-        description="ISO 8601 timestamp of the trigger.",
+        description="Type of task: one_time or recurring.",
     )
-    window: Optional[dict] = Field(
+    channel: str = Field(
+        ...,
+        description="Target delivery channel.",
+        examples=["telegram", "whatsapp", "web"],
+    )
+    user_id: str = Field(
+        ...,
+        description="Target user identifier.",
+        examples=["usr_9f2a7c41"],
+    )
+    conversation_id: Optional[str] = Field(
         None,
-        description="Time window context for the scan.",
-        examples=[{"timezone": "Asia/Singapore", "hour": 9}],
+        description="Target conversation ID. If omitted, derived from channel + user_id.",
     )
-    mode: str = Field(
-        default="scheduled",
-        description="Trigger mode: 'scheduled' or 'manual'.",
-        examples=["scheduled"],
+    payload: TaskPayload = Field(
+        ...,
+        description="Message payload to dispatch when the task fires.",
     )
-
-
-class CandidateSearchFilters(BaseModel):
-    """Filters for proactive candidate selection."""
-
-    min_days_inactive: int = Field(
+    schedule_config: ScheduleConfig = Field(
+        ...,
+        description="Schedule configuration (when to fire).",
+    )
+    max_retries: int = Field(
         default=3,
-        ge=1,
-        description="Minimum days of inactivity to qualify as a candidate.",
+        ge=0,
+        le=10,
+        description="Maximum retry attempts on dispatch failure.",
     )
-    min_affinity_score: float = Field(
-        default=0.5,
-        ge=0.0,
-        le=1.0,
-        description="Minimum affinity score to qualify as a candidate.",
+    metadata: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Arbitrary metadata from the registrant.",
     )
-    max_batch_size: int = Field(
-        default=500,
-        ge=1,
-        le=10000,
-        description="Maximum number of candidates to return.",
-    )
-
-
-class TimeContext(BaseModel):
-    """Time context for candidate selection."""
-
-    timezone: str = Field(
-        ...,
-        description="Target timezone for the scan (IANA format).",
-        examples=["Asia/Singapore"],
-    )
-    current_time: str = Field(
-        ...,
-        description="Current time in ISO 8601 format with timezone offset.",
-        examples=["2026-03-12T09:00:00+08:00"],
-    )
-
-
-class CandidateSearchRequest(BaseModel):
-    """
-    Request body for POST /api/v1/relationships/proactive-candidates/search.
-
-    Sent to: Relationship Service
-    """
-
-    filters: CandidateSearchFilters = Field(
-        ...,
-        description="Candidate selection filters.",
-    )
-    time_context: TimeContext = Field(
-        ...,
-        description="Time context for the scan.",
+    expires_at: Optional[datetime] = Field(
+        None,
+        description="Task expiration time (UTC). Expired tasks are auto-cancelled.",
     )
     correlation_id: Optional[str] = Field(
         None,
@@ -105,20 +78,94 @@ class CandidateSearchRequest(BaseModel):
     )
 
 
-class ManualTriggerRequest(BaseModel):
+class UpdateTaskRequest(BaseModel):
     """
-    Request body for POST /api/v1/proactive/trigger.
+    Request body for PUT /api/v1/tasks/{task_id} — Update a task.
 
-    Allows manual triggering of a proactive engagement scan via the API.
+    Only provided fields are updated; omitted fields remain unchanged.
     """
 
-    timezone: str = Field(
-        default="Asia/Singapore",
-        description="Target timezone for the scan.",
-    )
-    filters: Optional[CandidateSearchFilters] = Field(
+    payload: Optional[TaskPayload] = Field(
         None,
-        description="Optional custom filters. Defaults are used if omitted.",
+        description="Updated message payload.",
+    )
+    schedule_config: Optional[ScheduleConfig] = Field(
+        None,
+        description="Updated schedule configuration.",
+    )
+    max_retries: Optional[int] = Field(
+        None,
+        ge=0,
+        le=10,
+        description="Updated maximum retry attempts.",
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Updated metadata.",
+    )
+    expires_at: Optional[datetime] = Field(
+        None,
+        description="Updated expiration time.",
+    )
+    correlation_id: Optional[str] = Field(
+        None,
+        description="Correlation ID for distributed tracing.",
+    )
+
+
+class ListTasksParams(BaseModel):
+    """Query parameters for GET /api/v1/tasks — List tasks with filters."""
+
+    owner_service: Optional[str] = Field(
+        None,
+        description="Filter by registrant service name.",
+    )
+    status: Optional[str] = Field(
+        None,
+        description="Filter by task status.",
+    )
+    user_id: Optional[str] = Field(
+        None,
+        description="Filter by target user ID.",
+    )
+    channel: Optional[str] = Field(
+        None,
+        description="Filter by target channel.",
+    )
+    task_type: Optional[str] = Field(
+        None,
+        description="Filter by task type (one_time / recurring).",
+    )
+    limit: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description="Maximum number of tasks to return.",
+    )
+    offset: int = Field(
+        default=0,
+        ge=0,
+        description="Offset for pagination.",
+    )
+
+
+# ------------------------------------------------------------------ #
+# Scheduler Control Requests
+# ------------------------------------------------------------------ #
+
+
+class ManualPollTriggerRequest(BaseModel):
+    """
+    Request body for POST /api/v1/scheduler/trigger — Manual poll trigger.
+
+    Used for testing and operational purposes.
+    """
+
+    max_tasks: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Maximum number of due tasks to process in this poll cycle.",
     )
     correlation_id: Optional[str] = Field(
         None,
