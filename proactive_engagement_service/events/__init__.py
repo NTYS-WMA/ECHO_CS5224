@@ -1,4 +1,5 @@
-from .publisher import EventPublisher
-from .consumer import EventConsumer
+"""Events module for the Proactive Engagement Service."""
 
-__all__ = ["EventPublisher", "EventConsumer"]
+from .publisher import EventPublisher
+
+__all__ = ["EventPublisher"]

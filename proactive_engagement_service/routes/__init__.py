@@ -1,4 +1,7 @@
-from .engagement_routes import router as engagement_router
-from .health_routes import router as health_router
+"""Routes module for the Proactive Engagement Service v2.0."""
 
-__all__ = ["engagement_router", "health_router"]
+from .health_routes import router as health_router
+from .scheduler_routes import router as scheduler_router
+from .task_routes import router as task_router
+
+__all__ = ["health_router", "scheduler_router", "task_router"]
