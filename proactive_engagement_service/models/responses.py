@@ -1,96 +1,126 @@
 """
-Response models for the Proactive Engagement Service.
+Response models for the Proactive Engagement Service v2.0.
 
-Includes responses from dependent services and the service's own API responses.
+Includes response bodies for task CRUD operations, scheduler status,
+and poll execution results.
 """
 
-from typing import List, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from .domain import ScheduleConfig, ScheduledTask, TaskPayload, TaskStatus, TaskType
 
-class CandidateItem(BaseModel):
-    """A single proactive engagement candidate returned by the Relationship Service."""
 
-    user_id: str = Field(
+# ------------------------------------------------------------------ #
+# Task CRUD Responses
+# ------------------------------------------------------------------ #
+
+
+class TaskResponse(BaseModel):
+    """Response for a single task (GET, POST, PUT)."""
+
+    task_id: str = Field(..., description="Unique task identifier.")
+    owner_service: str = Field(..., description="Registrant service name.")
+    task_type: TaskType = Field(..., description="Task type.")
+    status: TaskStatus = Field(..., description="Current task status.")
+    channel: str = Field(..., description="Target delivery channel.")
+    user_id: str = Field(..., description="Target user identifier.")
+    conversation_id: Optional[str] = Field(None, description="Target conversation ID.")
+    payload: TaskPayload = Field(..., description="Message payload.")
+    schedule_config: ScheduleConfig = Field(..., description="Schedule configuration.")
+    next_run_at: Optional[datetime] = Field(None, description="Next execution time (UTC).")
+    last_run_at: Optional[datetime] = Field(None, description="Last execution time (UTC).")
+    retry_count: int = Field(default=0, description="Current retry count.")
+    max_retries: int = Field(default=3, description="Maximum retry attempts.")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Registrant metadata.")
+    created_at: datetime = Field(..., description="Creation timestamp (UTC).")
+    updated_at: datetime = Field(..., description="Last update timestamp (UTC).")
+    expires_at: Optional[datetime] = Field(None, description="Expiration time (UTC).")
+
+    @classmethod
+    def from_domain(cls, task: ScheduledTask) -> "TaskResponse":
+        """Create a TaskResponse from a ScheduledTask domain model."""
+        return cls(**task.model_dump())
+
+
+class TaskListResponse(BaseModel):
+    """Response for GET /api/v1/tasks — paginated task list."""
+
+    tasks: List[TaskResponse] = Field(
+        default_factory=list,
+        description="List of tasks matching the query.",
+    )
+    total: int = Field(
         ...,
-        description="Internal user identifier.",
-        examples=["usr_9f2a7c41"],
+        description="Total number of tasks matching the filters (for pagination).",
     )
-    days_inactive: int = Field(
-        ...,
-        ge=0,
-        description="Number of days since last interaction.",
-        examples=[3],
-    )
-    affinity_score: float = Field(
-        ...,
-        ge=0.0,
-        le=1.0,
-        description="Current affinity score.",
-        examples=[0.74],
-    )
+    limit: int = Field(..., description="Requested page size.")
+    offset: int = Field(..., description="Requested offset.")
 
 
-class CandidateSearchResponse(BaseModel):
-    """
-    Response from POST /api/v1/relationships/proactive-candidates/search.
+class TaskDeletedResponse(BaseModel):
+    """Response for DELETE /api/v1/tasks/{task_id}."""
 
-    Received from: Relationship Service
-    """
-
-    candidates: List[CandidateItem] = Field(
-        ...,
-        description="List of eligible proactive engagement candidates.",
-    )
-
-
-class DispatchResult(BaseModel):
-    """Result of a single proactive message dispatch attempt."""
-
-    user_id: str = Field(..., description="Internal user identifier.")
-    dispatched: bool = Field(
-        ...,
-        description="Whether the message was successfully dispatched.",
-    )
-    skip_reason: Optional[str] = Field(
-        None,
-        description="Reason for skipping if not dispatched.",
-        examples=["consent_denied", "quiet_hours", "generation_failed"],
-    )
-
-
-class ScanStatusResponse(BaseModel):
-    """
-    Response body for proactive scan status and manual trigger results.
-    """
-
-    scan_id: str = Field(
-        ...,
-        description="Unique scan identifier.",
-        examples=["scan-abc123"],
-    )
+    task_id: str = Field(..., description="Deleted task identifier.")
     status: str = Field(
-        ...,
-        description="Scan status: 'running', 'completed', or 'failed'.",
-        examples=["completed"],
+        default="cancelled",
+        description="Final task status after deletion.",
     )
-    candidates_scanned: int = Field(
-        ...,
-        ge=0,
-        description="Total number of candidates evaluated.",
+    message: str = Field(
+        default="Task cancelled successfully.",
+        description="Human-readable confirmation.",
     )
-    messages_dispatched: int = Field(
+
+
+# ------------------------------------------------------------------ #
+# Scheduler Responses
+# ------------------------------------------------------------------ #
+
+
+class SchedulerStatusResponse(BaseModel):
+    """Response for GET /api/v1/scheduler/status."""
+
+    running: bool = Field(
         ...,
-        ge=0,
-        description="Number of proactive messages successfully dispatched.",
+        description="Whether the polling engine is currently running.",
     )
-    messages_skipped: int = Field(
+    poll_interval_seconds: int = Field(
         ...,
-        ge=0,
-        description="Number of candidates skipped due to policy checks.",
+        description="Configured polling interval in seconds.",
     )
-    results: Optional[List[DispatchResult]] = Field(
+    last_poll_at: Optional[datetime] = Field(
         None,
-        description="Per-candidate dispatch results (included in detailed mode).",
+        description="Timestamp of the last poll cycle.",
     )
+    tasks_pending: int = Field(
+        default=0,
+        description="Number of tasks in 'scheduled' status.",
+    )
+    tasks_executing: int = Field(
+        default=0,
+        description="Number of tasks currently executing.",
+    )
+
+
+class PollExecutionResult(BaseModel):
+    """Result of a single task execution within a poll cycle."""
+
+    task_id: str = Field(..., description="Task identifier.")
+    success: bool = Field(..., description="Whether dispatch succeeded.")
+    error: Optional[str] = Field(None, description="Error message if failed.")
+
+
+class PollCycleResponse(BaseModel):
+    """Response for POST /api/v1/scheduler/trigger — manual poll result."""
+
+    poll_id: str = Field(..., description="Unique poll cycle identifier.")
+    tasks_found: int = Field(..., description="Number of due tasks found.")
+    tasks_dispatched: int = Field(..., description="Number of tasks successfully dispatched.")
+    tasks_failed: int = Field(..., description="Number of tasks that failed dispatch.")
+    results: List[PollExecutionResult] = Field(
+        default_factory=list,
+        description="Per-task execution results.",
+    )
+    duration_ms: float = Field(..., description="Poll cycle duration in milliseconds.")

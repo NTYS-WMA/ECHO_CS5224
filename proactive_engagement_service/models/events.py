@@ -1,121 +1,105 @@
 """
-Event models published by the Proactive Engagement Service to the
-Internal Asynchronous Messaging Layer.
+Event models for the Proactive Engagement Service v2.0.
+
+Defines event payloads published to the Internal Messaging Layer
+when tasks are dispatched or when lifecycle changes occur.
 """
 
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 
-class OutboundResponseItem(BaseModel):
-    """A single response item in the outbound event."""
-
-    type: str = Field(
-        default="text",
-        description="Response type.",
-        examples=["text"],
-    )
-    content: str = Field(
-        ...,
-        description="Message content.",
-        examples=["Hey Alice, just checking in—how has your week been so far?"],
-    )
-
-
-class ProactiveOutboundEvent(BaseModel):
+class TaskDispatchedEvent(BaseModel):
     """
+    Event published to topic: proactive.task.dispatched
+
+    Emitted when a scheduled task is successfully dispatched to the
+    Message Dispatch Hub.
+    """
+
+    event_id: str = Field(..., description="Unique event identifier.")
+    event_type: str = Field(
+        default="proactive.task.dispatched",
+        description="Event type discriminator.",
+    )
+    schema_version: str = Field(default="2.0", description="Schema version.")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Event timestamp (UTC).",
+    )
+    task_id: str = Field(..., description="Task identifier.")
+    user_id: str = Field(..., description="Target user identifier.")
+    channel: str = Field(..., description="Target delivery channel.")
+    conversation_id: Optional[str] = Field(None, description="Target conversation ID.")
+    owner_service: str = Field(..., description="Registrant service name.")
+    correlation_id: Optional[str] = Field(None, description="Correlation ID for tracing.")
+
+
+class TaskFailedEvent(BaseModel):
+    """
+    Event published to topic: proactive.task.failed
+
+    Emitted when a scheduled task exhausts all retries and is marked
+    as permanently failed.
+    """
+
+    event_id: str = Field(..., description="Unique event identifier.")
+    event_type: str = Field(
+        default="proactive.task.failed",
+        description="Event type discriminator.",
+    )
+    schema_version: str = Field(default="2.0", description="Schema version.")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Event timestamp (UTC).",
+    )
+    task_id: str = Field(..., description="Task identifier.")
+    user_id: str = Field(..., description="Target user identifier.")
+    owner_service: str = Field(..., description="Registrant service name.")
+    error: str = Field(..., description="Error description.")
+    retry_count: int = Field(..., description="Number of retries attempted.")
+    correlation_id: Optional[str] = Field(None, description="Correlation ID for tracing.")
+
+
+class OutboundMessagePayload(BaseModel):
+    """
+    Payload sent to the Message Dispatch Hub for outbound delivery.
+
     Published to topic: conversation.outbound
-
-    Emitted for each proactive message that should be delivered to a user.
-    Consumed by Channel Gateway / Channel Delivery Worker for outbound delivery.
     """
 
-    event_id: str = Field(
-        ...,
-        description="Unique event identifier.",
-        examples=["evt-7002"],
-    )
-    correlation_id: Optional[str] = Field(
-        None,
-        description="Correlation ID linking back to the scan trigger.",
-        examples=["evt-7001"],
-    )
+    event_id: str = Field(..., description="Unique event identifier.")
     event_type: str = Field(
-        default="conversation.reply.generated",
+        default="conversation.outbound",
         description="Event type discriminator.",
     )
-    schema_version: str = Field(
-        default="1.0",
-        description="Schema version for forward compatibility.",
-    )
+    schema_version: str = Field(default="2.0", description="Schema version.")
     timestamp: datetime = Field(
-        ...,
-        description="ISO 8601 timestamp of the event.",
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Event timestamp (UTC).",
     )
-    user_id: str = Field(
-        ...,
-        description="Internal user identifier.",
-        examples=["usr_9f2a7c41"],
+    task_id: str = Field(..., description="Source task identifier.")
+    user_id: str = Field(..., description="Target user identifier.")
+    channel: str = Field(..., description="Target delivery channel.")
+    conversation_id: Optional[str] = Field(None, description="Target conversation ID.")
+    message_type: str = Field(
+        default="text",
+        description="Message type: text, template, rich.",
     )
-    channel: str = Field(
-        ...,
-        description="Delivery channel.",
-        examples=["telegram"],
-    )
-    conversation_id: str = Field(
-        ...,
-        description="Conversation identifier for delivery routing.",
-        examples=["telegram-chat-123456789"],
-    )
-    responses: List[OutboundResponseItem] = Field(
-        ...,
-        description="List of response items to deliver.",
-    )
-    metadata: Optional[dict] = Field(
+    content: Optional[str] = Field(None, description="Text content.")
+    template_id: Optional[str] = Field(None, description="Template ID if template-based.")
+    template_variables: Optional[Dict[str, Any]] = Field(
         None,
-        description="Additional metadata for the outbound event.",
+        description="Template variables if template-based.",
     )
-
-
-class ProactiveDispatchCompletedEvent(BaseModel):
-    """
-    Published to topic: proactive.dispatch.completed
-
-    Emitted after a proactive scan completes for telemetry and monitoring.
-    """
-
-    event_id: str = Field(
-        ...,
-        description="Unique event identifier.",
-        examples=["evt-7003"],
-    )
-    correlation_id: Optional[str] = Field(
+    attachments: Optional[List[Dict[str, Any]]] = Field(
         None,
-        description="Correlation ID linking back to the scan trigger.",
-        examples=["evt-7001"],
+        description="Optional attachments.",
     )
-    event_type: str = Field(
-        default="proactive.dispatch.completed",
-        description="Event type discriminator.",
+    metadata: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Additional metadata from the registrant.",
     )
-    schema_version: str = Field(
-        default="1.0",
-        description="Schema version for forward compatibility.",
-    )
-    timestamp: datetime = Field(
-        ...,
-        description="ISO 8601 timestamp of completion.",
-    )
-    stats: dict = Field(
-        ...,
-        description="Dispatch statistics.",
-        examples=[
-            {
-                "candidates_scanned": 500,
-                "messages_dispatched": 127,
-                "messages_skipped": 373,
-            }
-        ],
-    )
+    correlation_id: Optional[str] = Field(None, description="Correlation ID for tracing.")

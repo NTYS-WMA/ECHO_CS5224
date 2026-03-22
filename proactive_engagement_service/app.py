@@ -1,8 +1,10 @@
 """
-FastAPI application entry point for the Proactive Engagement Service.
+FastAPI application entry point for the Proactive Engagement Service v2.0.
 
-Initializes clients, services, event consumer/publisher, and routes,
-and manages the application lifecycle (startup/shutdown).
+Wires together all service components:
+- DatabaseServiceClient → TaskService → Task CRUD routes
+- MessageDispatchClient + TaskExecutor → PollingScheduler → Scheduler routes
+- EventPublisher → TaskExecutor (telemetry)
 """
 
 import logging
@@ -12,107 +14,138 @@ from typing import Optional
 from fastapi import FastAPI
 
 from .config.settings import get_settings
-from .events.consumer import EventConsumer
 from .events.publisher import EventPublisher
-from .routes.engagement_routes import router as engagement_router
 from .routes.health_routes import router as health_router
-from .services.ai_generation_client import AIGenerationServiceClient
-from .services.eligibility_checker import EligibilityChecker
-from .services.engagement_service import ProactiveEngagementService
-from .services.memory_client import MemoryServiceClient
-from .services.relationship_client import RelationshipServiceClient
-from .services.user_profile_client import UserProfileServiceClient
+from .routes.scheduler_routes import router as scheduler_router
+from .routes.task_routes import router as task_router
+from .services.db_client import DatabaseServiceClient
+from .services.dispatcher import MessageDispatchClient
+from .services.scheduler import PollingScheduler
+from .services.task_executor import TaskExecutor
+from .services.task_service import TaskService
 
 logger = logging.getLogger(__name__)
 
-# Module-level reference for dependency injection
-_engagement_service: Optional[ProactiveEngagementService] = None
+# ------------------------------------------------------------------ #
+# Module-level singletons (set during lifespan)
+# ------------------------------------------------------------------ #
+
+_task_service: Optional[TaskService] = None
+_scheduler: Optional[PollingScheduler] = None
 
 
-def get_app_engagement_service() -> ProactiveEngagementService:
-    """Return the initialized ProactiveEngagementService instance."""
-    if _engagement_service is None:
-        raise RuntimeError("ProactiveEngagementService has not been initialized.")
-    return _engagement_service
+def get_app_task_service() -> TaskService:
+    """Return the application-level TaskService singleton."""
+    assert _task_service is not None, "TaskService not initialized."
+    return _task_service
+
+
+def get_app_scheduler() -> PollingScheduler:
+    """Return the application-level PollingScheduler singleton."""
+    assert _scheduler is not None, "PollingScheduler not initialized."
+    return _scheduler
+
+
+# ------------------------------------------------------------------ #
+# Application Lifespan
+# ------------------------------------------------------------------ #
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan manager for startup and shutdown."""
-    global _engagement_service
+    """
+    Application lifespan handler.
+
+    Startup:
+        1. Create DatabaseServiceClient.
+        2. Create TaskService.
+        3. Create MessageDispatchClient.
+        4. Create EventPublisher.
+        5. Create TaskExecutor.
+        6. Create and start PollingScheduler.
+
+    Shutdown:
+        1. Stop PollingScheduler.
+        2. Close EventPublisher.
+    """
+    global _task_service, _scheduler
 
     settings = get_settings()
 
     # Configure logging
     logging.basicConfig(
-        level=getattr(logging, settings.LOG_LEVEL, logging.INFO),
+        level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
 
-    logger.info("Starting Proactive Engagement Service v%s", settings.SERVICE_VERSION)
-
-    # Initialize HTTP clients for dependent services
-    relationship_client = RelationshipServiceClient(
-        base_url=settings.RELATIONSHIP_SERVICE_BASE_URL,
-        timeout_seconds=settings.HTTP_TIMEOUT_SECONDS,
+    logger.info(
+        "Starting %s v%s ...",
+        settings.SERVICE_NAME,
+        settings.SERVICE_VERSION,
     )
 
-    user_profile_client = UserProfileServiceClient(
-        base_url=settings.USER_PROFILE_SERVICE_BASE_URL,
-        timeout_seconds=settings.HTTP_TIMEOUT_SECONDS,
+    # 1. Database Service Client
+    db_client = DatabaseServiceClient(
+        base_url=settings.DATABASE_SERVICE_URL,
+        timeout_seconds=settings.DATABASE_SERVICE_TIMEOUT,
     )
 
-    ai_generation_client = AIGenerationServiceClient(
-        base_url=settings.AI_GENERATION_SERVICE_BASE_URL,
-        timeout_seconds=30,  # AI generation may take longer
+    # 2. Task Service
+    _task_service = TaskService(db_client=db_client)
+
+    # 3. Message Dispatch Hub Client
+    dispatch_client = MessageDispatchClient(
+        base_url=settings.DISPATCH_HUB_URL,
+        timeout_seconds=settings.DISPATCH_HUB_TIMEOUT,
     )
 
-    memory_client = MemoryServiceClient(
-        base_url=settings.MEMORY_SERVICE_BASE_URL,
-        timeout_seconds=settings.HTTP_TIMEOUT_SECONDS,
-    )
-
-    # Initialize eligibility checker
-    eligibility_checker = EligibilityChecker(
-        default_quiet_start=settings.DEFAULT_QUIET_HOURS_START,
-        default_quiet_end=settings.DEFAULT_QUIET_HOURS_END,
-    )
-
-    # Initialize event publisher
+    # 4. Event Publisher
     event_publisher = EventPublisher(
         broker_url=settings.EVENT_BROKER_URL,
         enabled=settings.EVENT_PUBLISH_ENABLED,
     )
-    await event_publisher.connect()
 
-    # Initialize the core engagement service
-    _engagement_service = ProactiveEngagementService(
-        relationship_client=relationship_client,
-        user_profile_client=user_profile_client,
-        ai_generation_client=ai_generation_client,
-        memory_client=memory_client,
-        eligibility_checker=eligibility_checker,
+    # 5. Task Executor
+    executor = TaskExecutor(
+        db_client=db_client,
+        dispatch_client=dispatch_client,
         event_publisher=event_publisher,
-        settings=settings,
     )
 
-    # Initialize and start event consumer
-    event_consumer = EventConsumer(
-        broker_url=settings.EVENT_BROKER_URL,
-        enabled=settings.EVENT_CONSUME_ENABLED,
+    # 6. Polling Scheduler
+    _scheduler = PollingScheduler(
+        db_client=db_client,
+        executor=executor,
+        poll_interval_seconds=settings.POLL_INTERVAL_SECONDS,
+        max_tasks_per_poll=settings.MAX_TASKS_PER_POLL,
     )
-    event_consumer.register_scan_handler(_engagement_service.handle_scan_trigger)
-    await event_consumer.start()
 
-    logger.info("Proactive Engagement Service initialized successfully.")
+    if settings.SCHEDULER_ENABLED:
+        await _scheduler.start()
 
-    yield
+    logger.info(
+        "%s v%s started (scheduler=%s, poll_interval=%ds).",
+        settings.SERVICE_NAME,
+        settings.SERVICE_VERSION,
+        "enabled" if settings.SCHEDULER_ENABLED else "disabled",
+        settings.POLL_INTERVAL_SECONDS,
+    )
+
+    yield  # Application is running
 
     # Shutdown
-    logger.info("Shutting down Proactive Engagement Service...")
-    await event_consumer.stop()
-    await event_publisher.disconnect()
-    _engagement_service = None
+    logger.info("Shutting down %s ...", settings.SERVICE_NAME)
+    if _scheduler and _scheduler.running:
+        await _scheduler.stop()
+    await event_publisher.close()
+    _task_service = None
+    _scheduler = None
+    logger.info("Shutdown complete.")
+
+
+# ------------------------------------------------------------------ #
+# FastAPI Application
+# ------------------------------------------------------------------ #
 
 
 def create_app() -> FastAPI:
@@ -120,21 +153,24 @@ def create_app() -> FastAPI:
     settings = get_settings()
 
     app = FastAPI(
-        title="ECHO Proactive Engagement Service",
+        title="Proactive Engagement Service",
         description=(
-            "Determines when ECHO should initiate outbound engagement, manages "
-            "candidate selection, policy checking, and message dispatch pipeline."
+            "Scheduled task management and polling engine for proactive "
+            "outbound messaging in the ECHO platform. Provides task CRUD "
+            "for service registrants and an internal polling scheduler "
+            "that dispatches due tasks to the Message Dispatch Hub."
         ),
         version=settings.SERVICE_VERSION,
         lifespan=lifespan,
     )
 
     # Register routes
-    app.include_router(engagement_router)
     app.include_router(health_router)
+    app.include_router(task_router)
+    app.include_router(scheduler_router)
 
     return app
 
 
-# Application instance for ASGI servers (e.g., uvicorn)
+# Module-level app instance for uvicorn
 app = create_app()

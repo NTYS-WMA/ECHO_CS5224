@@ -1,145 +1,86 @@
 """
-Event publisher for the Proactive Engagement Service.
+Event publisher for the Proactive Engagement Service v2.0.
 
-Publishes domain events to the Internal Asynchronous Messaging Layer.
+Publishes task lifecycle events to the Internal Messaging Layer.
 
 Topics published:
-    - conversation.outbound: Proactive messages for channel delivery.
-    - proactive.dispatch.completed: Telemetry event after scan completion.
+    - proactive.task.dispatched: A task was successfully dispatched.
+    - proactive.task.failed: A task exhausted retries and failed permanently.
+    - conversation.outbound: Outbound message sent to Message Dispatch Hub.
 
-TO BE UPDATED: Replace the stub broker client with the actual messaging
-layer client once the infrastructure component is finalized.
+TO BE UPDATED: Replace the placeholder implementation with the
+actual broker client once the messaging infrastructure is confirmed.
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import List, Optional
-
-from ..models.events import (
-    OutboundResponseItem,
-    ProactiveDispatchCompletedEvent,
-    ProactiveOutboundEvent,
-)
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
 
 class EventPublisher:
     """
-    Publishes Proactive Engagement Service domain events to the messaging layer.
+    Publishes events to the Internal Messaging Layer.
+
+    TO BE UPDATED: Replace the placeholder implementation with the
+    actual broker client (Kafka, SNS, Redis Streams, etc.) once the
+    messaging infrastructure is confirmed by the platform team.
     """
 
     def __init__(self, broker_url: str, enabled: bool = True):
+        """
+        Initialize the event publisher.
+
+        Args:
+            broker_url: URL of the messaging broker.
+            enabled: Whether publishing is enabled.
+        """
         self._broker_url = broker_url
         self._enabled = enabled
-        self._client = None  # TO BE UPDATED: Initialize actual broker client
+        logger.info(
+            "EventPublisher initialized (broker=%s, enabled=%s).",
+            broker_url,
+            enabled,
+        )
 
-    async def connect(self) -> None:
+    async def publish(self, topic: str, payload: Dict[str, Any]) -> bool:
         """
-        Establish connection to the message broker.
-
-        TO BE UPDATED: Implement actual broker connection logic.
-        """
-        if not self._enabled:
-            logger.info("Event publishing is disabled; skipping broker connection.")
-            return
-        logger.info("Event publisher connected to broker at %s", self._broker_url)
-
-    async def disconnect(self) -> None:
-        """
-        Gracefully close the broker connection.
-
-        TO BE UPDATED: Implement actual broker disconnection logic.
-        """
-        if self._client:
-            pass  # TO BE UPDATED: Close actual broker connection
-        logger.info("Event publisher disconnected.")
-
-    async def publish_proactive_outbound(
-        self,
-        event_id: str,
-        user_id: str,
-        channel: str,
-        conversation_id: str,
-        responses: List[OutboundResponseItem],
-        correlation_id: Optional[str] = None,
-        metadata: Optional[dict] = None,
-    ) -> None:
-        """
-        Publish a proactive outbound message to conversation.outbound topic.
-
-        This event is consumed by the Channel Gateway / Channel Delivery Worker
-        for actual message delivery to the user.
+        Publish an event to a topic.
 
         Args:
-            event_id: Unique event identifier.
-            user_id: Internal user identifier.
-            channel: Delivery channel (e.g., 'telegram').
-            conversation_id: Conversation identifier for routing.
-            responses: List of response items to deliver.
-            correlation_id: Optional correlation ID for tracing.
-            metadata: Optional additional metadata.
-        """
-        event = ProactiveOutboundEvent(
-            event_id=event_id,
-            correlation_id=correlation_id,
-            timestamp=datetime.now(timezone.utc),
-            user_id=user_id,
-            channel=channel,
-            conversation_id=conversation_id,
-            responses=responses,
-            metadata=metadata or {"source": "proactive_engagement"},
-        )
-        await self._publish("conversation.outbound", event.model_dump_json())
+            topic: Event topic / channel name.
+            payload: Event payload (JSON-serializable dict).
 
-    async def publish_dispatch_completed(
-        self,
-        event_id: str,
-        correlation_id: Optional[str],
-        candidates_scanned: int,
-        messages_dispatched: int,
-        messages_skipped: int,
-    ) -> None:
-        """
-        Publish a proactive.dispatch.completed telemetry event.
-
-        Args:
-            event_id: Unique event identifier.
-            correlation_id: Correlation ID from the scan trigger.
-            candidates_scanned: Total candidates evaluated.
-            messages_dispatched: Messages successfully dispatched.
-            messages_skipped: Candidates skipped due to policy.
-        """
-        event = ProactiveDispatchCompletedEvent(
-            event_id=event_id,
-            correlation_id=correlation_id,
-            timestamp=datetime.now(timezone.utc),
-            stats={
-                "candidates_scanned": candidates_scanned,
-                "messages_dispatched": messages_dispatched,
-                "messages_skipped": messages_skipped,
-            },
-        )
-        await self._publish("proactive.dispatch.completed", event.model_dump_json())
-
-    async def _publish(self, topic: str, payload: str) -> None:
-        """
-        Publish a serialized event to the specified topic.
-
-        TO BE UPDATED: Replace with actual broker publish call.
+        Returns:
+            True if published successfully, False otherwise.
         """
         if not self._enabled:
-            logger.debug(
-                "Event publishing disabled. Would publish to '%s': %s",
-                topic,
-                payload[:200],
-            )
-            return
+            logger.debug("Event publishing disabled. Skipping topic=%s.", topic)
+            return False
 
         try:
-            # TO BE UPDATED: Replace with actual broker publish logic
-            logger.info("Published event to topic '%s': %s", topic, payload[:200])
+            # TO BE UPDATED: Replace with actual broker publish call.
+            # Example for Kafka:
+            #   await self._producer.send(topic, json.dumps(payload).encode())
+            # Example for SNS:
+            #   await self._sns_client.publish(TopicArn=..., Message=json.dumps(payload))
+            logger.info(
+                "Event published to topic=%s: event_type=%s, event_id=%s",
+                topic,
+                payload.get("event_type", "unknown"),
+                payload.get("event_id", "unknown"),
+            )
+            return True
         except Exception as e:
             logger.error(
-                "Failed to publish event to topic '%s': %s", topic, str(e)
+                "Failed to publish event to topic=%s: %s", topic, str(e)
             )
+            return False
+
+    async def close(self) -> None:
+        """
+        Close the publisher and release resources.
+
+        TO BE UPDATED: Implement broker-specific cleanup.
+        """
+        logger.info("EventPublisher closed.")

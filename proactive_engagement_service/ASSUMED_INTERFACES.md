@@ -1,316 +1,278 @@
 # Proactive Engagement Service — Assumed External Interfaces
 
-**Version**: 1.0  
-**Last Updated**: 2026-03-23  
-**Status**: TO BE UPDATED — These interfaces are assumed based on the architecture specification and have not been confirmed with the owning teams.
+> **TO BE UPDATED**: This document lists all external service interfaces that the
+> Proactive Engagement Service depends on but are **not yet formally defined** by
+> their owning teams. Each section describes the assumed contract. Owning teams
+> should review and confirm or revise these contracts.
+
+**Version**: 2.0
+**Last Updated**: 2026-03-23
 
 ---
 
-## Purpose
+## Table of Contents
 
-This document lists all external service interfaces that the Proactive Engagement Service depends on but that are not yet formally defined or deployed. Each entry describes the assumed contract so that integration can proceed. Once the owning service publishes its official API, the corresponding assumption should be verified and this document updated accordingly.
+1. [Database Service — Task CRUD](#1-database-service--task-crud)
+2. [Message Dispatch Hub — Send Message](#2-message-dispatch-hub--send-message)
+3. [Internal Messaging Layer — Event Broker](#3-internal-messaging-layer--event-broker)
 
 ---
 
-## 1. Relationship Service — Proactive Candidate Search
+## 1. Database Service — Task CRUD
 
-**Owner**: Relationship Service Team  
+**Owner**: Database Service Team
 **Status**: TO BE UPDATED
+**Assumed Base URL**: `http://localhost:8010` (env: `PROACTIVE_DATABASE_SERVICE_URL`)
 
-The Proactive Engagement Service calls this endpoint to search for users who are candidates for proactive outreach based on inactivity and affinity score thresholds.
+The Proactive Engagement Service relies on the Database Service for **all** persistent
+storage of scheduled tasks. It does not maintain its own database.
 
-**Assumed Endpoint**:
+### 1.1 Create Task — `POST /api/v1/scheduled_tasks`
 
-```
-POST /api/v1/relationships/proactive-candidates/search
-```
+Store a new scheduled task record.
 
-**Assumed Base URL**: Configured via `PROACTIVE_RELATIONSHIP_SERVICE_BASE_URL` environment variable.
-
-**Assumed Request**:
+**Request Body**:
 
 ```json
 {
-  "filters": {
-    "min_days_inactive": 3,
-    "min_affinity_score": 0.5,
-    "max_batch_size": 500
-  },
-  "time_context": {
-    "timezone": "Asia/Singapore",
-    "current_time": "2026-03-12T09:00:00+08:00"
-  },
-  "correlation_id": "evt-7001"
-}
-```
-
-| Field            | Type   | Required | Description                          |
-|------------------|--------|----------|--------------------------------------|
-| `filters`        | object | yes      | Candidate selection filters          |
-| `time_context`   | object | yes      | Time context for the scan            |
-| `correlation_id` | string | no       | Correlation ID for tracing           |
-
-**Assumed Response** `200 OK`:
-
-```json
-{
-  "candidates": [
-    {
-      "user_id": "usr_9f2a7c41",
-      "days_inactive": 3,
-      "affinity_score": 0.74
-    },
-    {
-      "user_id": "usr_b3d8e012",
-      "days_inactive": 5,
-      "affinity_score": 0.62
-    }
-  ]
-}
-```
-
-**Notes**:
-
-- Candidates should be returned sorted by affinity score descending.
-- The Relationship Service is responsible for enforcing the `max_batch_size` limit.
-- The `time_context` allows the Relationship Service to factor in timezone-aware inactivity calculations.
-
----
-
-## 2. Relationship Service — User Relationship Context
-
-**Owner**: Relationship Service Team  
-**Status**: TO BE UPDATED
-
-Used to retrieve detailed relationship context for a specific user when needed for enrichment.
-
-**Assumed Endpoint**:
-
-```
-GET /api/v1/relationships/{user_id}/context
-```
-
-**Assumed Response** `200 OK`:
-
-```json
-{
-  "user_id": "usr_9f2a7c41",
-  "tier": "close_friend",
-  "affinity_score": 0.74,
-  "days_inactive": 3,
-  "last_interaction": "2026-03-09T14:30:00Z",
-  "interaction_count": 145
-}
-```
-
-**Notes**:
-
-- Returns 404 if no relationship data exists for the user.
-- This endpoint is used for individual enrichment, not batch operations.
-
----
-
-## 3. User Profile Service — User Profile Retrieval
-
-**Owner**: User Profile Service Team  
-**Status**: TO BE UPDATED
-
-The Proactive Engagement Service calls this endpoint to retrieve user consent flags, quiet hours preferences, timezone, and channel information for eligibility checking and outbound delivery routing.
-
-**Assumed Endpoint**:
-
-```
-GET /api/v1/users/{user_id}/profile
-```
-
-**Assumed Base URL**: Configured via `PROACTIVE_USER_PROFILE_SERVICE_BASE_URL` environment variable.
-
-**Assumed Response** `200 OK`:
-
-```json
-{
-  "user_id": "usr_9f2a7c41",
-  "external_user_id": "telegram:123456789",
+  "task_id": "task_a1b2c3d4e5f6",
+  "owner_service": "relationship-service",
+  "task_type": "one_time",
+  "status": "scheduled",
   "channel": "telegram",
-  "timezone": "Asia/Singapore",
-  "consent": {
-    "data_collection": true,
-    "proactive_messaging": true,
-    "memory_storage": true
+  "user_id": "usr_001",
+  "conversation_id": "conv_abc",
+  "payload": {
+    "message_type": "text",
+    "content": "Hey, how have you been?",
+    "template_id": null,
+    "template_variables": null,
+    "metadata": {}
   },
-  "preferences": {
-    "quiet_hours": {
-      "start": "22:00",
-      "end": "07:00"
-    },
-    "language": "en"
+  "schedule_config": {
+    "scheduled_at": "2026-04-01T09:00:00Z",
+    "cron_expression": null,
+    "interval_seconds": null,
+    "timezone": "UTC",
+    "expires_at": null
+  },
+  "next_run_at": "2026-04-01T09:00:00Z",
+  "retry_count": 0,
+  "max_retries": 3,
+  "priority": 5,
+  "tags": ["re-engagement"],
+  "created_at": "2026-03-22T18:00:00Z",
+  "updated_at": "2026-03-22T18:00:00Z"
+}
+```
+
+**Expected Response `201 Created`**: The stored task object (echo back).
+
+---
+
+### 1.2 Get Task by ID — `GET /api/v1/scheduled_tasks/{task_id}`
+
+**Expected Response `200 OK`**: Full task object.
+
+**Expected Response `404 Not Found`**: `{ "detail": "Not found" }`
+
+---
+
+### 1.3 List Tasks — `GET /api/v1/scheduled_tasks`
+
+**Query Parameters**:
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `owner_service` | string | Filter by registrant |
+| `status` | string | Filter by status |
+| `user_id` | string | Filter by user |
+| `channel` | string | Filter by channel |
+| `tag` | string | Filter by tag |
+| `page` | integer | Page number (1-based) |
+| `page_size` | integer | Items per page |
+
+**Expected Response `200 OK`**:
+
+```json
+{
+  "tasks": [ { "...task object..." } ],
+  "total": 42
+}
+```
+
+---
+
+### 1.4 Update Task — `PUT /api/v1/scheduled_tasks/{task_id}`
+
+Partial update. Only provided fields are updated; `updated_at` should be refreshed
+server-side.
+
+**Request Body**: Any subset of task fields.
+
+**Expected Response `200 OK`**: Updated task object.
+
+**Expected Response `404 Not Found`**: `{ "detail": "Not found" }`
+
+---
+
+### 1.5 Delete Task — `DELETE /api/v1/scheduled_tasks/{task_id}`
+
+Hard delete or soft delete (set `status=cancelled`).
+
+**Expected Response `200 OK`**: `{ "deleted": true }`
+
+**Expected Response `404 Not Found`**: `{ "detail": "Not found" }`
+
+---
+
+### 1.6 Query Due Tasks — `GET /api/v1/scheduled_tasks/due`
+
+Return tasks where `next_run_at <= now` and `status = scheduled`, ordered by
+priority (ascending) then `next_run_at` (ascending).
+
+**Query Parameters**:
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `now` | datetime (ISO 8601) | Current UTC timestamp |
+| `limit` | integer | Max tasks to return |
+
+**Expected Response `200 OK`**:
+
+```json
+{
+  "tasks": [ { "...task object..." } ]
+}
+```
+
+---
+
+### 1.7 Count Tasks by Status — `GET /api/v1/scheduled_tasks/count`
+
+**Query Parameters**:
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `status` | string | Task status to count |
+
+**Expected Response `200 OK`**:
+
+```json
+{
+  "count": 15
+}
+```
+
+---
+
+## 2. Message Dispatch Hub — Send Message
+
+**Owner**: Message Dispatch Hub Team
+**Status**: TO BE UPDATED
+**Assumed Base URL**: `http://localhost:8020` (env: `PROACTIVE_DISPATCH_HUB_URL`)
+
+### 2.1 Send Message — `POST /api/v1/dispatch/send`
+
+Dispatch an outbound message to a user through the specified channel.
+
+**Request Body**:
+
+```json
+{
+  "event_id": "evt_xxx",
+  "task_id": "task_xxx",
+  "user_id": "usr_001",
+  "channel": "telegram",
+  "conversation_id": "conv_abc",
+  "message_type": "text",
+  "content": "Hey, how have you been?",
+  "template_id": null,
+  "template_variables": null,
+  "metadata": {
+    "source": "proactive_engagement",
+    "owner_service": "relationship-service"
   }
 }
 ```
 
-**Fields used by this service**:
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `event_id` | string | Yes | Unique event ID for idempotency |
+| `task_id` | string | Yes | Source task ID |
+| `user_id` | string | Yes | Target user ID |
+| `channel` | string | Yes | Delivery channel |
+| `conversation_id` | string | No | Conversation context |
+| `message_type` | string | Yes | `text` or `template` |
+| `content` | string | Conditional | Message content (for `text` type) |
+| `template_id` | string | Conditional | Template ID (for `template` type) |
+| `template_variables` | object | No | Template variables |
+| `metadata` | object | No | Additional metadata |
 
-| Field                           | Usage                                      |
-|---------------------------------|--------------------------------------------|
-| `consent.proactive_messaging`   | Eligibility check — consent gate           |
-| `preferences.quiet_hours.start` | Eligibility check — quiet hours gate       |
-| `preferences.quiet_hours.end`   | Eligibility check — quiet hours gate       |
-| `timezone`                      | Quiet hours calculation and personalization |
-| `channel`                       | Outbound delivery routing                  |
-| `external_user_id`              | Conversation ID derivation                 |
-
-**Notes**:
-
-- Returns 404 if the user profile does not exist.
-- The `external_user_id` format is `{channel}:{platform_user_id}`.
-- Conversation ID is derived as `{channel}-chat-{platform_user_id}`. This derivation convention is assumed and may need to be updated.
-
----
-
-## 4. AI Generation Service — Proactive Message Generation
-
-**Owner**: AI Generation Service Team  
-**Status**: Defined (see `ai_generation_service/API_INTERFACES.md`)
-
-The Proactive Engagement Service calls the AI Generation Service to request AI-generated proactive outreach messages.
-
-**Primary Endpoint (v2.0 — recommended)**:
-
-```
-POST /api/v1/generation/execute
-```
-
-Using `template_id: "tpl_proactive_outreach"` with the `context_block` variable assembled by the Proactive Engagement Service.
-
-**Legacy Endpoint (deprecated)**:
-
-```
-POST /api/v1/generation/proactive-messages
-```
-
-**Base URL**: Configured via `PROACTIVE_AI_GENERATION_SERVICE_BASE_URL` environment variable.
-
-**Request and response schemas**: See [AI Generation Service API_INTERFACES.md](../ai_generation_service/API_INTERFACES.md).
-
-**Notes**:
-
-- This is the only dependency that is formally defined within this project.
-- The AI Generation Service may return 503 (retryable) or 500 (non-retryable) errors.
-- On failure, the candidate is marked as `generation_failed` and skipped.
-- The Proactive Engagement Service is responsible for assembling the `context_block` variable from relationship data, user profile, and memory summaries.
-
----
-
-## 5. Memory Service (MyMem0) — Semantic Memory Search
-
-**Owner**: Memory Service Team  
-**Status**: TO BE UPDATED
-
-The Proactive Engagement Service calls this endpoint to retrieve recent memory summaries for personalizing proactive outreach messages.
-
-**Assumed Endpoint**:
-
-```
-POST /search
-```
-
-**Assumed Base URL**: Configured via `PROACTIVE_MEMORY_SERVICE_BASE_URL` environment variable (default: `http://localhost:18088`).
-
-**Assumed Request**:
+**Expected Response `200 OK`**:
 
 ```json
 {
-  "query": "recent activities and preferences",
-  "user_id": "usr_9f2a7c41",
-  "limit": 5,
-  "threshold": 0.3
+  "dispatch_id": "dsp_xxx",
+  "status": "sent",
+  "channel": "telegram",
+  "delivered_at": "2026-03-22T18:30:05Z"
 }
 ```
 
-| Field      | Type    | Required | Description                                |
-|------------|---------|----------|--------------------------------------------|
-| `query`    | string  | yes      | Semantic search query                      |
-| `user_id`  | string  | yes      | Internal user identifier                   |
-| `limit`    | integer | no       | Maximum number of results (default: 5)     |
-| `threshold`| float   | no       | Minimum similarity threshold (default: 0.3)|
+**Expected Error Responses**:
 
-**Assumed Response** `200 OK`:
+| Status | Meaning |
+|--------|---------|
+| 400 | Invalid request (missing fields, unknown channel) |
+| 404 | User or conversation not found |
+| 429 | Rate limited |
+| 503 | Channel temporarily unavailable |
 
-```json
-{
-  "results": [
-    {
-      "id": "mem-001",
-      "memory": "User enjoys evening workouts and friendly check-ins",
-      "score": 0.85,
-      "created_at": "2026-03-10T14:00:00Z"
-    },
-    {
-      "id": "mem-002",
-      "memory": "User prefers casual conversation tone",
-      "score": 0.72,
-      "created_at": "2026-03-09T10:00:00Z"
+---
+
+## 3. Internal Messaging Layer — Event Broker
+
+**Owner**: Platform / Infrastructure Team
+**Status**: TO BE UPDATED
+**Assumed Broker URL**: `http://localhost:9092` (env: `PROACTIVE_EVENT_BROKER_URL`)
+
+The Proactive Engagement Service publishes lifecycle events to the messaging layer.
+The actual broker technology (Kafka, AWS SNS/SQS, Redis Streams, etc.) is to be
+confirmed by the platform team.
+
+### 3.1 Topics Published
+
+| Topic | Description |
+|-------|-------------|
+| `proactive.task.dispatched` | Task successfully dispatched |
+| `proactive.task.failed` | Task failed after all retries |
+| `conversation.outbound` | Outbound message payload |
+
+### 3.2 Expected Publish Interface
+
+```python
+# Pseudocode — actual client TBD
+await broker.publish(
+    topic="proactive.task.dispatched",
+    payload={
+        "event_type": "proactive.task.dispatched",
+        "event_id": "evt_xxx",
+        "task_id": "task_xxx",
+        "user_id": "usr_xxx",
+        "channel": "telegram",
+        "owner_service": "relationship-service",
+        "dispatched_at": "2026-03-22T18:30:00Z",
+        "schema_version": "2.0"
     }
-  ]
-}
+)
 ```
 
-**Notes**:
-
-- Memory retrieval is best-effort. If the Memory Service is unavailable or returns no results, the proactive message is generated without personalization context.
-- The `memory` field from each result is concatenated with semicolons to form the `recent_summary` passed to the AI Generation Service.
-- This interface is based on the MyMem0 integration guide's `/search` endpoint.
-
 ---
 
-## 6. Internal Asynchronous Messaging Layer — Event Consumption and Publishing
+## Change Log
 
-**Owner**: Platform / Infrastructure Team  
-**Status**: TO BE UPDATED
-
-The Proactive Engagement Service both consumes and publishes events via the Internal Asynchronous Messaging Layer.
-
-### 6.1 Consumed Topics
-
-| Topic                       | Description                                    |
-|-----------------------------|------------------------------------------------|
-| `proactive.scan.requested`  | Scan trigger from platform scheduler           |
-
-### 6.2 Published Topics
-
-| Topic                          | Description                                 |
-|--------------------------------|---------------------------------------------|
-| `conversation.outbound`        | Proactive messages for channel delivery     |
-| `proactive.dispatch.completed` | Telemetry event after scan completion       |
-
-**Assumed Broker Interface**: Same as described in the AI Generation Service's ASSUMED_INTERFACES.md. The concrete broker technology has not been finalized.
-
-**Configuration**: Broker URL is configured via `PROACTIVE_EVENT_BROKER_URL` environment variable.
-
----
-
-## 7. Platform Scheduler — Scan Trigger
-
-**Owner**: Platform / Infrastructure Team  
-**Status**: TO BE UPDATED
-
-The platform scheduler is responsible for publishing `proactive.scan.requested` events at configured intervals (e.g., daily at 9:00 AM in each target timezone).
-
-**Assumed Behavior**:
-
-- The scheduler publishes one event per timezone window per day.
-- The event includes a `window` object with `timezone` and `hour` fields.
-- The scheduler does not manage candidate selection or dispatch — it only triggers the scan.
-
-**Notes**:
-
-- The scheduler implementation is outside the scope of this service.
-- For testing, use the `POST /api/v1/proactive/trigger` endpoint to simulate scan triggers.
-
----
-
-## Revision History
-
-| Date       | Change                                    |
-|------------|-------------------------------------------|
-| 2026-03-23 | Initial assumed interfaces documented     |
+| Date | Version | Change |
+|------|---------|--------|
+| 2026-03-23 | 2.0 | Complete rewrite. Replaced Relationship/UserProfile/Memory/AI Generation client dependencies with Database Service and Message Dispatch Hub. Service is now a task scheduler, not a pipeline. |
+| 2026-03-23 | 1.0 | Initial version with pipeline-based architecture. |
