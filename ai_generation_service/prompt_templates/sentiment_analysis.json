@@ -1,0 +1,30 @@
+{
+  "template_id": "tpl_sentiment_analysis",
+  "name": "Sentiment Analysis",
+  "description": "System-level template for analyzing the sentiment of user messages. The business layer provides the text to analyze and the desired output format.",
+  "version": "1.0.0",
+  "owner": "ai-generation-service",
+  "category": "analysis",
+  "system_prompt": "You are a sentiment analysis assistant for the ECHO companion platform. Analyze the given text and provide a structured sentiment assessment. Be objective and precise.",
+  "user_prompt_template": "Analyze the sentiment of the following text and respond in {{output_format}} format.\n\nText:\n{{text}}\n\nProvide: overall sentiment (positive/negative/neutral/mixed), confidence score (0-1), and key emotional signals detected.",
+  "variables": {
+    "text": {
+      "type": "string",
+      "required": true,
+      "description": "The text to analyze for sentiment."
+    },
+    "output_format": {
+      "type": "string",
+      "required": false,
+      "default": "JSON",
+      "description": "Desired output format (e.g., 'JSON', 'plain text')."
+    }
+  },
+  "defaults": {
+    "temperature": 0.2,
+    "max_tokens": 200
+  },
+  "tags": ["analysis", "sentiment", "nlu"],
+  "created_at": "2026-03-23T00:00:00Z",
+  "updated_at": "2026-03-23T00:00:00Z"
+}
