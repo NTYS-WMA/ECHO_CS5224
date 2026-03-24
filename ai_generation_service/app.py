@@ -77,6 +77,7 @@ async def lifespan(app: FastAPI):
         model_id=settings.BEDROCK_MODEL_ID,
         timeout_seconds=settings.BEDROCK_TIMEOUT_SECONDS,
         max_retries=settings.BEDROCK_MAX_RETRIES,
+        embedding_model_id=settings.BEDROCK_EMBEDDING_MODEL_ID,
     )
 
     fallback_provider = None
