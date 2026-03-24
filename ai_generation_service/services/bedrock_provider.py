@@ -15,6 +15,7 @@ from typing import List, Optional
 
 from .provider_base import (
     AIProviderBase,
+    EmbeddingResponse,
     ProviderError,
     ProviderResponse,
     ProviderTimeoutError,
@@ -36,6 +37,7 @@ class BedrockProvider(AIProviderBase):
         model_id: str = "anthropic.claude-sonnet-4-20250514",
         timeout_seconds: int = 30,
         max_retries: int = 2,
+        embedding_model_id: str = "amazon.titan-embed-text-v2:0",
     ):
         """
         Initialize the Bedrock provider.
@@ -45,11 +47,13 @@ class BedrockProvider(AIProviderBase):
             model_id: Bedrock model identifier.
             timeout_seconds: Request timeout in seconds.
             max_retries: Maximum retry attempts for transient failures.
+            embedding_model_id: Bedrock model identifier for embeddings.
         """
         self._region = region
         self._model_id = model_id
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
+        self._embedding_model_id = embedding_model_id
         self._client = None
 
     async def _get_client(self):
@@ -174,6 +178,59 @@ class BedrockProvider(AIProviderBase):
             error_msg = str(e)
             logger.error("Bedrock generation failed: %s", error_msg)
             raise ProviderError(f"Bedrock generation failed: {error_msg}")
+
+    async def embed(self, text: str) -> EmbeddingResponse:
+        """
+        Generate an embedding vector using Amazon Titan Embeddings via Bedrock.
+
+        Args:
+            text: The input text to embed.
+
+        Returns:
+            EmbeddingResponse with the embedding vector and usage metadata.
+        """
+        client = await self._get_client()
+
+        request_body = json.dumps({"inputText": text})
+
+        try:
+            loop = asyncio.get_event_loop()
+            response = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: client.invoke_model(
+                        modelId=self._embedding_model_id,
+                        contentType="application/json",
+                        accept="application/json",
+                        body=request_body,
+                    ),
+                ),
+                timeout=self._timeout_seconds,
+            )
+
+            response_body = json.loads(response["body"].read())
+            embedding = response_body.get("embedding", [])
+            input_tokens = response_body.get("inputTextTokenCount", 0)
+
+            return EmbeddingResponse(
+                embedding=embedding,
+                model=self._embedding_model_id,
+                input_tokens=input_tokens,
+            )
+
+        except asyncio.TimeoutError:
+            logger.error(
+                "Bedrock embedding request timed out after %ds for model %s",
+                self._timeout_seconds,
+                self._embedding_model_id,
+            )
+            raise ProviderTimeoutError(
+                f"Bedrock embedding request timed out after {self._timeout_seconds}s"
+            )
+        except Exception as e:
+            error_msg = str(e)
+            logger.error("Bedrock embedding failed: %s", error_msg)
+            raise ProviderError(f"Bedrock embedding failed: {error_msg}")
 
     async def health_check(self) -> bool:
         """Check if the Bedrock service is reachable."""

@@ -16,6 +16,7 @@ import httpx
 
 from .provider_base import (
     AIProviderBase,
+    EmbeddingResponse,
     ProviderError,
     ProviderResponse,
     ProviderTimeoutError,
@@ -114,6 +115,41 @@ class FallbackProvider(AIProviderBase):
         except Exception as e:
             logger.error("Fallback provider error: %s", str(e))
             raise ProviderError(f"Fallback provider error: {str(e)}")
+
+    async def embed(self, text: str) -> EmbeddingResponse:
+        """
+        Generate an embedding via the OpenAI-compatible /embeddings endpoint.
+        """
+        url = f"{self._api_base_url}/embeddings"
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {"model": self._model_id, "input": text}
+
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+
+            embedding_data = data.get("data", [{}])[0]
+            usage = data.get("usage", {})
+
+            return EmbeddingResponse(
+                embedding=embedding_data.get("embedding", []),
+                model=data.get("model", self._model_id),
+                input_tokens=usage.get("prompt_tokens", 0),
+            )
+
+        except httpx.TimeoutException:
+            raise ProviderTimeoutError(
+                f"Fallback embedding timed out after {self._timeout_seconds}s"
+            )
+        except httpx.HTTPStatusError as e:
+            raise ProviderError(f"Fallback embedding HTTP error: {e.response.status_code}")
+        except Exception as e:
+            raise ProviderError(f"Fallback embedding error: {str(e)}")
 
     async def health_check(self) -> bool:
         """Check if the fallback API is reachable."""
