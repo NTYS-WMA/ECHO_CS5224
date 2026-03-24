@@ -1,14 +1,62 @@
 """
-Configuration settings for the Cron Service v2.0.
+Configuration settings for the Cron Service v3.0.
 
 All settings can be overridden via environment variables with the
 CRON_ prefix.
 """
 
+import json
 from functools import lru_cache
+from typing import Any, Dict, List, Optional
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
+
+
+class ScheduleEntryConfig(BaseSettings):
+    """A single schedule entry loaded from configuration."""
+
+    name: str = Field(..., description="Unique schedule name.")
+    cron_expression: Optional[str] = Field(
+        None,
+        description="5-field cron expression (e.g. '0 3 * * *').",
+    )
+    interval_seconds: Optional[int] = Field(
+        None,
+        ge=60,
+        description="Fixed interval in seconds (min 60).",
+    )
+    topic: str = Field(
+        ...,
+        description="Event topic to publish when schedule fires.",
+    )
+    payload: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Static payload to include in the published event.",
+    )
+    enabled: bool = Field(
+        default=True,
+        description="Whether this schedule is active.",
+    )
+
+
+# Default schedules reflecting the ECHO platform's periodic needs.
+DEFAULT_SCHEDULES: List[Dict[str, Any]] = [
+    {
+        "name": "relationship-decay",
+        "cron_expression": "0 3 * * *",
+        "topic": "relationship.decay.requested",
+        "payload": {},
+        "enabled": True,
+    },
+    {
+        "name": "memory-compaction",
+        "cron_expression": "0 4 * * 0",
+        "topic": "memory.compaction.requested",
+        "payload": {},
+        "enabled": True,
+    },
+]
 
 
 class Settings(BaseSettings):
@@ -20,7 +68,7 @@ class Settings(BaseSettings):
         description="Service name for logging and registration.",
     )
     SERVICE_VERSION: str = Field(
-        default="2.0.0",
+        default="3.0.0",
         description="Service version.",
     )
     HOST: str = Field(
@@ -36,51 +84,10 @@ class Settings(BaseSettings):
         description="Logging level.",
     )
 
-    # Database Service (external)
-    DATABASE_SERVICE_URL: str = Field(
-        default="http://localhost:8010",
-        description="Base URL of the Database Service module.",
-    )
-    DATABASE_SERVICE_TIMEOUT: int = Field(
-        default=10,
-        description="HTTP timeout for Database Service calls (seconds).",
-    )
-
-    # Message Dispatch Hub (external)
-    DISPATCH_HUB_URL: str = Field(
-        default="http://localhost:8020",
-        description="Base URL of the Message Dispatch Hub.",
-    )
-    DISPATCH_HUB_TIMEOUT: int = Field(
-        default=15,
-        description="HTTP timeout for Message Dispatch Hub calls (seconds).",
-    )
-
-    # Polling Scheduler
-    POLL_INTERVAL_SECONDS: int = Field(
-        default=30,
-        ge=5,
-        description="Seconds between polling cycles.",
-    )
-    MAX_TASKS_PER_POLL: int = Field(
-        default=100,
-        ge=1,
-        le=1000,
-        description="Maximum tasks to process per poll cycle.",
-    )
-    SCHEDULER_ENABLED: bool = Field(
-        default=True,
-        description="Whether to start the background polling scheduler on boot.",
-    )
-
     # Event Publishing (Internal Messaging Layer)
     EVENT_BROKER_URL: str = Field(
         default="http://localhost:9092",
         description="Base URL of the HTTP event broker.",
-    )
-    EVENT_PUBLISH_ENABLED: bool = Field(
-        default=True,
-        description="Whether to publish lifecycle events.",
     )
     EVENT_PUBLISH_TIMEOUT: int = Field(
         default=5,
@@ -93,16 +100,35 @@ class Settings(BaseSettings):
         description="Number of retries for failed event publish attempts.",
     )
 
-    # HTTP client settings
-    HTTP_TIMEOUT_SECONDS: int = Field(
-        default=15,
-        description="Default HTTP client timeout.",
+    # Scheduler tick interval — how often the scheduler checks for due jobs
+    TICK_INTERVAL_SECONDS: int = Field(
+        default=30,
+        ge=5,
+        description="Seconds between scheduler tick cycles.",
+    )
+
+    # Schedules — JSON string or loaded from default
+    SCHEDULES_JSON: str = Field(
+        default="",
+        description=(
+            "JSON array of schedule entries.  "
+            "If empty, built-in defaults are used."
+        ),
     )
 
     class Config:
         env_prefix = "CRON_"
         env_file = ".env"
         case_sensitive = True
+
+    def get_schedules(self) -> List[ScheduleEntryConfig]:
+        """Parse and return schedule entries from config."""
+        raw: List[Dict[str, Any]]
+        if self.SCHEDULES_JSON.strip():
+            raw = json.loads(self.SCHEDULES_JSON)
+        else:
+            raw = DEFAULT_SCHEDULES
+        return [ScheduleEntryConfig(**entry) for entry in raw]
 
 
 @lru_cache()
