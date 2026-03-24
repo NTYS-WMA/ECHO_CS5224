@@ -1,63 +1,63 @@
-# Cron Service v2.0
+# Cron Service v3.0
 
-Scheduled task management and polling engine for proactive outbound messaging in the ECHO platform.
+Lightweight global time-trigger service for the ECHO platform.
 
 ---
 
 ## Overview
 
-The Cron Service is responsible for **receiving, storing, scheduling, and dispatching** proactive outbound messages on behalf of other ECHO services. It acts as a centralized task scheduler — business callers decide **who** to message, **what** to say, and **when** to send; this service stores the task, triggers it on schedule, and dispatches it to the Message Dispatch Hub.
+The Cron Service is a **pure scheduling infrastructure component**. It maintains an in-memory schedule table (cron tabs) and, when a scheduled time arrives, publishes the corresponding event to the internal messaging layer (event broker). Business services subscribe to these events and execute their own domain logic.
 
 ### Core Responsibilities
 
-1. **Task CRUD** — Receive, register, update, pause, resume, and cancel scheduled message tasks from service registrants.
-2. **Persistent Storage** — Read/write all task data through the Database Service module (no local database).
-3. **Polling Scheduler** — Internal polling loop that periodically discovers due tasks (`next_run_at <= now`) and dispatches them.
-4. **Message Dispatch** — Forward due tasks to the Message Dispatch Hub for actual delivery.
-5. **Event Publishing** — Publish task lifecycle events (`dispatched`, `failed`) for telemetry.
+1. **Schedule Management** — Maintain a table of named cron schedules loaded from configuration.
+2. **Time Triggering** — Background tick loop checks for due schedules and fires them.
+3. **Event Publishing** — Publish events to the broker via HTTP when schedules fire.
+4. **Operational APIs** — Health checks, schedule listing, and manual trigger for ops/testing.
 
 ### What This Service Does NOT Do
 
-- **Candidate selection** — Business callers decide who should receive messages.
-- **Prompt assembly** — Business callers assemble message content or provide template IDs.
-- **Consent/policy checking** — Business callers enforce their own policies before registering tasks.
-- **Database management** — All data is managed by the Database Service module.
+- **Business logic** — No knowledge of relationship scoring, message content, user profiles, etc.
+- **Task CRUD** — No database. Schedules are defined in configuration.
+- **Message dispatch** — No direct connection to Message Dispatch Hub or channel gateways.
+- **Retry / state management** — Downstream consumers handle their own retries.
 
----
-
-## Architecture
+### Architecture Principle
 
 ```
-┌─────────────────────┐     ┌──────────────────────┐
-│  Service Registrant  │────▶│  Task CRUD APIs       │
-│  (Relationship Svc,  │     │  POST/GET/PUT/DELETE  │
-│   Orchestrator, etc) │     │  /api/v1/tasks        │
-└─────────────────────┘     └──────────┬───────────┘
-                                       │
-                                       ▼
-                            ┌──────────────────────┐
-                            │  Database Service     │
-                            │  (HTTP API)           │
-                            └──────────┬───────────┘
-                                       │
-                                       ▼
-                            ┌──────────────────────┐
-                            │  Polling Scheduler    │
-                            │  (Background Loop)    │
-                            │  every N seconds      │
-                            └──────────┬───────────┘
-                                       │
-                              ┌────────┴────────┐
-                              ▼                 ▼
-                   ┌──────────────┐  ┌──────────────────┐
-                   │ Task Executor │  │  Event Publisher  │
-                   └──────┬───────┘  └──────────────────┘
-                          │
-                          ▼
-                   ┌──────────────────┐
-                   │ Message Dispatch  │
-                   │ Hub (HTTP API)    │
-                   └──────────────────┘
+┌──────────────────────┐
+│    Configuration     │  (JSON env var or defaults)
+│    ┌───────────┐     │
+│    │ Schedule 1 │     │  name: relationship-decay
+│    │ Schedule 2 │     │  name: memory-compaction
+│    │ ...        │     │
+│    └───────────┘     │
+└──────────┬───────────┘
+           │
+           ▼
+┌──────────────────────┐
+│   CronScheduler      │  Background tick loop (every N seconds)
+│   ┌──────────────┐   │
+│   │ Check due     │   │  next_fire_at <= now?
+│   │ schedules     │   │
+│   └──────┬───────┘   │
+│          │            │
+│          ▼            │
+│   ┌──────────────┐   │
+│   │ EventPublisher│   │  POST {broker}/api/v1/events
+│   └──────────────┘   │
+└──────────────────────┘
+           │
+           ▼
+┌──────────────────────┐
+│   Event Broker       │  relationship.decay.requested
+│   (Internal Bus)     │  memory.compaction.requested
+└──────────────────────┘
+           │
+           ▼
+┌──────────────────────┐
+│  Business Consumers  │  Relationship Service, Memory Service, etc.
+└──────────────────────┘
 ```
 
 ---
@@ -66,73 +66,56 @@ The Cron Service is responsible for **receiving, storing, scheduling, and dispat
 
 ```
 cron/
-├── __init__.py                  # Package init (v2.0.0)
+├── __init__.py                  # Package init (v3.0.0)
 ├── app.py                       # FastAPI application entry point
 ├── requirements.txt             # Python dependencies
-├── API_INTERFACES.md            # API reference for callers
-├── ASSUMED_INTERFACES.md        # Assumed external interfaces (TO BE UPDATED)
 ├── README.md                    # This file
 │
 ├── config/
 │   ├── __init__.py
-│   └── settings.py              # Environment-based configuration
+│   └── settings.py              # Environment-based configuration + schedule defs
 │
 ├── models/
 │   ├── __init__.py
-│   ├── domain.py                # Domain models (ScheduledTask, enums)
+│   ├── domain.py                # ScheduleEntry model
+│   ├── events.py                # CronTriggeredEvent model
 │   ├── requests.py              # API request models
-│   ├── responses.py             # API response models
-│   └── events.py                # Event payload models
+│   └── responses.py             # API response models
 │
 ├── services/
 │   ├── __init__.py
-│   ├── db_client.py             # Database Service HTTP client
-│   ├── dispatcher.py            # Message Dispatch Hub HTTP client
-│   ├── task_service.py          # Task CRUD business logic
-│   ├── task_executor.py         # Single task execution pipeline
-│   └── scheduler.py             # Background polling engine
+│   └── scheduler.py             # CronScheduler — background tick engine
 │
 ├── routes/
 │   ├── __init__.py
-│   ├── task_routes.py           # Task CRUD endpoints
-│   ├── scheduler_routes.py      # Scheduler control endpoints
+│   ├── schedule_routes.py       # Schedule listing & manual trigger
 │   └── health_routes.py         # Health check endpoints
 │
 ├── events/
 │   ├── __init__.py
-│   └── publisher.py             # Event publisher (HTTP broker client)
+│   └── publisher.py             # HTTP event publisher
 │
 ├── utils/
 │   ├── __init__.py
-│   └── helpers.py               # ID generation, cron parsing, time utils
+│   └── helpers.py               # ID generation, cron parsing
 │
 └── tests/
     ├── __init__.py
-    └── test_engagement.py       # Unit tests (40 tests)
+    └── test_engagement.py       # Unit tests
 ```
 
 ---
 
 ## API Summary
 
-### Task Management
+### Schedules
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/v1/tasks` | Register a new scheduled task |
-| GET | `/api/v1/tasks` | List tasks (with filters and pagination) |
-| GET | `/api/v1/tasks/{task_id}` | Get a task by ID |
-| PUT | `/api/v1/tasks/{task_id}` | Update a task |
-| DELETE | `/api/v1/tasks/{task_id}` | Cancel (soft-delete) a task |
-| POST | `/api/v1/tasks/{task_id}/pause` | Pause a task |
-| POST | `/api/v1/tasks/{task_id}/resume` | Resume a paused task |
-
-### Scheduler Control
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
+| GET | `/api/v1/schedules` | List all configured schedules |
+| GET | `/api/v1/schedules/{name}` | Get a single schedule |
 | GET | `/api/v1/scheduler/status` | Get scheduler status |
-| POST | `/api/v1/scheduler/trigger` | Manually trigger a poll cycle |
+| POST | `/api/v1/scheduler/trigger/{name}` | Manually trigger a schedule |
 
 ### Health
 
@@ -141,40 +124,30 @@ cron/
 | GET | `/health` | Liveness check |
 | GET | `/ready` | Readiness check |
 
-For full API details, see [API_INTERFACES.md](./API_INTERFACES.md).
-
 ---
 
-## Task Lifecycle
+## Published Events
 
+When a schedule fires, the service publishes an event to the configured topic:
+
+```json
+{
+  "event_id": "evt_abc123def456",
+  "event_type": "relationship.decay.requested",
+  "source": "cron-service",
+  "schema_version": "3.0",
+  "timestamp": "2026-03-24T03:00:00Z",
+  "schedule_name": "relationship-decay",
+  "payload": {}
+}
 ```
-  Register
-     │
-     ▼
-  PENDING ──▶ SCHEDULED ──▶ EXECUTING ──▶ COMPLETED
-                  │              │
-                  │              ├──▶ FAILED (after max retries)
-                  │              │
-                  │              └──▶ SCHEDULED (retry / recurring reschedule)
-                  │
-                  ├──▶ PAUSED ──▶ SCHEDULED (resume)
-                  │
-                  └──▶ CANCELLED (delete)
-```
 
-### Task Types
+### Default Schedules
 
-| Type | Behavior |
-|------|----------|
-| `one_time` | Executes once at `scheduled_at`, then moves to `completed` |
-| `recurring` | Executes on schedule (`cron_expression` or `interval_seconds`), auto-reschedules `next_run_at` |
-
-### Payload Types
-
-| Type | Description |
-|------|-------------|
-| `text` | Raw message content in `payload.content` |
-| `template` | AI Generation template ID in `payload.template_id` with variables |
+| Schedule | Cron | Topic | Description |
+|----------|------|-------|-------------|
+| `relationship-decay` | `0 3 * * *` | `relationship.decay.requested` | Daily at 03:00 UTC |
+| `memory-compaction` | `0 4 * * 0` | `memory.compaction.requested` | Weekly Sunday at 04:00 UTC |
 
 ---
 
@@ -186,13 +159,23 @@ All settings are loaded from environment variables with the `CRON_` prefix:
 |----------|---------|-------------|
 | `CRON_SERVICE_NAME` | `cron-service` | Service name |
 | `CRON_PORT` | `8005` | HTTP port |
-| `CRON_DATABASE_SERVICE_URL` | `http://localhost:8010` | Database Service URL |
-| `CRON_DISPATCH_HUB_URL` | `http://localhost:8020` | Message Dispatch Hub URL |
-| `CRON_POLL_INTERVAL_SECONDS` | `30` | Polling interval (min: 5) |
-| `CRON_MAX_TASKS_PER_POLL` | `100` | Max tasks per poll cycle |
-| `CRON_SCHEDULER_ENABLED` | `true` | Enable background scheduler |
 | `CRON_EVENT_BROKER_URL` | `http://localhost:9092` | Event broker URL |
+| `CRON_EVENT_PUBLISH_TIMEOUT` | `5` | Publish timeout (seconds) |
+| `CRON_EVENT_PUBLISH_RETRIES` | `2` | Publish retry count |
+| `CRON_TICK_INTERVAL_SECONDS` | `30` | Scheduler tick interval (min: 5) |
+| `CRON_SCHEDULES_JSON` | `""` | Custom schedules (JSON array) |
 | `CRON_LOG_LEVEL` | `INFO` | Logging level |
+
+### Custom Schedules via Environment
+
+Set `CRON_SCHEDULES_JSON` to override the default schedule table:
+
+```bash
+export CRON_SCHEDULES_JSON='[
+  {"name":"relationship-decay","cron_expression":"0 3 * * *","topic":"relationship.decay.requested"},
+  {"name":"proactive-scan","cron_expression":"0 9 * * 1-5","topic":"proactive.scan.requested"}
+]'
+```
 
 ---
 
@@ -208,13 +191,3 @@ uvicorn cron.app:app --host 0.0.0.0 --port 8005
 # Run tests
 python -m pytest cron/tests/ -v
 ```
-
----
-
-## External Dependencies
-
-| Service | Status | Documentation |
-|---------|--------|---------------|
-| Database Service | TO BE UPDATED | See [ASSUMED_INTERFACES.md](./ASSUMED_INTERFACES.md) §1 |
-| Message Dispatch Hub | TO BE UPDATED | See [ASSUMED_INTERFACES.md](./ASSUMED_INTERFACES.md) §2 |
-| Internal Messaging Layer | TO BE UPDATED | See [ASSUMED_INTERFACES.md](./ASSUMED_INTERFACES.md) §3 |

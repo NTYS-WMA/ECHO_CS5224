@@ -1,19 +1,19 @@
 """
-Tests for the Cron Service v2.0.
+Tests for the Cron Service v3.0.
 
 Tests cover:
-- Domain models and validation
-- Utility functions (ID generation, cron parsing, next_run_at)
-- Task CRUD API routes (via TestClient)
-- Scheduler routes
-- Health routes
+- Domain models (ScheduleEntry)
+- Event models (CronTriggeredEvent)
+- Utility functions (ID generation, cron parsing, compute_next_run_at)
+- Configuration (settings, schedule loading)
+- API routes (health, schedules, scheduler status)
 """
 
-import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
+
 
 # ================================================================== #
 # 1. Domain Model Tests
@@ -21,116 +21,117 @@ from fastapi.testclient import TestClient
 
 
 class TestDomainModels:
-    """Test domain models and enums."""
+    """Test domain models."""
 
-    def test_task_status_values(self):
-        from cron.models.domain import TaskStatus
+    def test_schedule_entry_cron(self):
+        from cron.models.domain import ScheduleEntry
 
-        assert TaskStatus.PENDING == "pending"
-        assert TaskStatus.SCHEDULED == "scheduled"
-        assert TaskStatus.EXECUTING == "executing"
-        assert TaskStatus.COMPLETED == "completed"
-        assert TaskStatus.FAILED == "failed"
-        assert TaskStatus.CANCELLED == "cancelled"
-        assert TaskStatus.PAUSED == "paused"
-
-    def test_task_type_values(self):
-        from cron.models.domain import TaskType
-
-        assert TaskType.ONE_TIME == "one_time"
-        assert TaskType.RECURRING == "recurring"
-
-    def test_schedule_config_one_time(self):
-        from cron.models.domain import ScheduleConfig
-
-        dt = datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc)
-        config = ScheduleConfig(scheduled_at=dt)
-        assert config.scheduled_at == dt
-        assert config.cron_expression is None
-        assert config.interval_seconds is None
-        assert config.timezone == "UTC"
-
-    def test_schedule_config_recurring_cron(self):
-        from cron.models.domain import ScheduleConfig
-
-        config = ScheduleConfig(cron_expression="0 9 * * *")
-        assert config.cron_expression == "0 9 * * *"
-        assert config.scheduled_at is None
-
-    def test_schedule_config_recurring_interval(self):
-        from cron.models.domain import ScheduleConfig
-
-        config = ScheduleConfig(interval_seconds=3600)
-        assert config.interval_seconds == 3600
-
-    def test_schedule_config_interval_min_validation(self):
-        from pydantic import ValidationError
-        from cron.models.domain import ScheduleConfig
-
-        with pytest.raises(ValidationError):
-            ScheduleConfig(interval_seconds=30)  # min is 60
-
-    def test_task_payload_text(self):
-        from cron.models.domain import TaskPayload
-
-        payload = TaskPayload(message_type="text", content="Hello!")
-        assert payload.message_type == "text"
-        assert payload.content == "Hello!"
-        assert payload.template_id is None
-
-    def test_task_payload_template(self):
-        from cron.models.domain import TaskPayload
-
-        payload = TaskPayload(
-            message_type="template",
-            template_id="tpl_abc123",
-            template_variables={"name": "Alice"},
+        entry = ScheduleEntry(
+            name="test-decay",
+            cron_expression="0 3 * * *",
+            topic="relationship.decay.requested",
         )
-        assert payload.message_type == "template"
-        assert payload.template_id == "tpl_abc123"
+        assert entry.name == "test-decay"
+        assert entry.cron_expression == "0 3 * * *"
+        assert entry.topic == "relationship.decay.requested"
+        assert entry.enabled is True
+        assert entry.payload == {}
+        assert entry.next_fire_at is None
+        assert entry.last_fired_at is None
 
-    def test_scheduled_task_creation(self):
-        from cron.models.domain import (
-            ScheduleConfig,
-            ScheduledTask,
-            TaskPayload,
-            TaskStatus,
-            TaskType,
+    def test_schedule_entry_interval(self):
+        from cron.models.domain import ScheduleEntry
+
+        entry = ScheduleEntry(
+            name="test-interval",
+            interval_seconds=3600,
+            topic="test.ping",
+            payload={"key": "value"},
         )
+        assert entry.interval_seconds == 3600
+        assert entry.payload == {"key": "value"}
+
+    def test_schedule_entry_disabled(self):
+        from cron.models.domain import ScheduleEntry
+
+        entry = ScheduleEntry(
+            name="disabled",
+            cron_expression="0 0 * * *",
+            topic="test.disabled",
+            enabled=False,
+        )
+        assert entry.enabled is False
+
+    def test_schedule_entry_with_fire_times(self):
+        from cron.models.domain import ScheduleEntry
 
         now = datetime.now(timezone.utc)
-        task = ScheduledTask(
-            task_id="task_test123",
-            owner_service="test-service",
-            task_type=TaskType.ONE_TIME,
-            status=TaskStatus.SCHEDULED,
-            channel="telegram",
-            user_id="usr_001",
-            payload=TaskPayload(message_type="text", content="Hi"),
-            schedule_config=ScheduleConfig(scheduled_at=now + timedelta(hours=1)),
-            next_run_at=now + timedelta(hours=1),
-            created_at=now,
-            updated_at=now,
+        entry = ScheduleEntry(
+            name="test",
+            cron_expression="0 9 * * *",
+            topic="test.topic",
+            next_fire_at=now + timedelta(hours=1),
+            last_fired_at=now - timedelta(hours=23),
         )
-        assert task.task_id == "task_test123"
-        assert task.retry_count == 0
-        assert task.max_retries == 3
+        assert entry.next_fire_at > now
+        assert entry.last_fired_at < now
+
+    def test_schedule_entry_interval_min_validation(self):
+        from pydantic import ValidationError
+        from cron.models.domain import ScheduleEntry
+
+        with pytest.raises(ValidationError):
+            ScheduleEntry(
+                name="invalid",
+                interval_seconds=30,  # min is 60
+                topic="test",
+            )
 
 
 # ================================================================== #
-# 2. Utility Function Tests
+# 2. Event Model Tests
+# ================================================================== #
+
+
+class TestEventModels:
+    """Test event models."""
+
+    def test_cron_triggered_event(self):
+        from cron.models.events import CronTriggeredEvent
+
+        event = CronTriggeredEvent(
+            event_id="evt_001",
+            event_type="relationship.decay.requested",
+            schedule_name="relationship-decay",
+            payload={"scope": "all"},
+        )
+        assert event.event_id == "evt_001"
+        assert event.event_type == "relationship.decay.requested"
+        assert event.source == "cron-service"
+        assert event.schema_version == "3.0"
+        assert event.schedule_name == "relationship-decay"
+        assert event.payload == {"scope": "all"}
+        assert event.timestamp is not None
+
+    def test_cron_triggered_event_defaults(self):
+        from cron.models.events import CronTriggeredEvent
+
+        event = CronTriggeredEvent(
+            event_id="evt_002",
+            event_type="test.topic",
+            schedule_name="test",
+        )
+        assert event.payload == {}
+        assert event.correlation_id is None
+
+
+# ================================================================== #
+# 3. Utility Function Tests
 # ================================================================== #
 
 
 class TestUtilities:
     """Test utility functions."""
-
-    def test_generate_task_id(self):
-        from cron.utils.helpers import generate_task_id
-
-        tid = generate_task_id()
-        assert tid.startswith("task_")
-        assert len(tid) == 17  # task_ + 12 hex chars
 
     def test_generate_event_id(self):
         from cron.utils.helpers import generate_event_id
@@ -138,16 +139,10 @@ class TestUtilities:
         eid = generate_event_id()
         assert eid.startswith("evt_")
 
-    def test_generate_poll_id(self):
-        from cron.utils.helpers import generate_poll_id
-
-        pid = generate_poll_id()
-        assert pid.startswith("poll_")
-
     def test_generate_ids_unique(self):
-        from cron.utils.helpers import generate_task_id
+        from cron.utils.helpers import generate_event_id
 
-        ids = {generate_task_id() for _ in range(100)}
+        ids = {generate_event_id() for _ in range(100)}
         assert len(ids) == 100
 
     def test_utc_now(self):
@@ -202,183 +197,101 @@ class TestUtilities:
 
 
 # ================================================================== #
-# 3. Request / Response Model Tests
+# 4. Response Model Tests
 # ================================================================== #
-
-
-class TestRequestModels:
-    """Test request model validation."""
-
-    def test_register_task_request_valid(self):
-        from cron.models.requests import RegisterTaskRequest
-        from cron.models.domain import (
-            ScheduleConfig,
-            TaskPayload,
-            TaskType,
-        )
-
-        req = RegisterTaskRequest(
-            owner_service="test-service",
-            task_type=TaskType.ONE_TIME,
-            channel="telegram",
-            user_id="usr_001",
-            payload=TaskPayload(message_type="text", content="Hello"),
-            schedule_config=ScheduleConfig(
-                scheduled_at=datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc)
-            ),
-        )
-        assert req.max_retries == 3  # default
-
-    def test_register_task_request_recurring(self):
-        from cron.models.requests import RegisterTaskRequest
-        from cron.models.domain import (
-            ScheduleConfig,
-            TaskPayload,
-            TaskType,
-        )
-
-        req = RegisterTaskRequest(
-            owner_service="relationship-service",
-            task_type=TaskType.RECURRING,
-            channel="whatsapp",
-            user_id="usr_002",
-            payload=TaskPayload(
-                message_type="template",
-                template_id="tpl_proactive",
-                template_variables={"name": "Bob"},
-            ),
-            schedule_config=ScheduleConfig(cron_expression="0 9 * * 1-5"),
-        )
-        assert req.task_type == TaskType.RECURRING
-
-    def test_update_task_request_partial(self):
-        from cron.models.requests import UpdateTaskRequest
-        from cron.models.domain import TaskPayload
-
-        req = UpdateTaskRequest(
-            payload=TaskPayload(message_type="text", content="Updated message"),
-        )
-        assert req.payload is not None
-        assert req.schedule_config is None
-        assert req.max_retries is None
-
-    def test_manual_poll_trigger_defaults(self):
-        from cron.models.requests import ManualPollTriggerRequest
-
-        req = ManualPollTriggerRequest()
-        assert req.max_tasks == 100
 
 
 class TestResponseModels:
-    """Test response model construction."""
+    """Test response models."""
 
-    def test_task_response_from_domain(self):
-        from cron.models.domain import (
-            ScheduleConfig,
-            ScheduledTask,
-            TaskPayload,
-            TaskStatus,
-            TaskType,
+    def test_schedule_entry_response(self):
+        from cron.models.responses import ScheduleEntryResponse
+
+        resp = ScheduleEntryResponse(
+            name="test",
+            cron_expression="0 3 * * *",
+            topic="test.topic",
+            enabled=True,
         )
-        from cron.models.responses import TaskResponse
+        assert resp.name == "test"
+        assert resp.topic == "test.topic"
 
-        now = datetime.now(timezone.utc)
-        task = ScheduledTask(
-            task_id="task_abc",
-            owner_service="test",
-            task_type=TaskType.ONE_TIME,
-            status=TaskStatus.SCHEDULED,
-            channel="web",
-            user_id="usr_x",
-            payload=TaskPayload(message_type="text", content="Hi"),
-            schedule_config=ScheduleConfig(scheduled_at=now + timedelta(hours=1)),
-            next_run_at=now + timedelta(hours=1),
-            created_at=now,
-            updated_at=now,
-        )
-        resp = TaskResponse.from_domain(task)
-        assert resp.task_id == "task_abc"
-        assert resp.status == TaskStatus.SCHEDULED
+    def test_schedule_list_response(self):
+        from cron.models.responses import ScheduleEntryResponse, ScheduleListResponse
 
-    def test_poll_cycle_response(self):
-        from cron.models.responses import (
-            PollCycleResponse,
-            PollExecutionResult,
-        )
-
-        resp = PollCycleResponse(
-            poll_id="poll_test",
-            tasks_found=5,
-            tasks_dispatched=3,
-            tasks_failed=2,
-            results=[
-                PollExecutionResult(task_id="t1", success=True),
-                PollExecutionResult(task_id="t2", success=False, error="timeout"),
+        resp = ScheduleListResponse(
+            schedules=[
+                ScheduleEntryResponse(
+                    name="s1",
+                    cron_expression="0 3 * * *",
+                    topic="t1",
+                    enabled=True,
+                ),
+                ScheduleEntryResponse(
+                    name="s2",
+                    interval_seconds=3600,
+                    topic="t2",
+                    enabled=False,
+                ),
             ],
-            duration_ms=123.45,
+            total=2,
         )
-        assert resp.tasks_found == 5
-        assert len(resp.results) == 2
+        assert resp.total == 2
+        assert len(resp.schedules) == 2
 
-    def test_task_deleted_response(self):
-        from cron.models.responses import TaskDeletedResponse
+    def test_scheduler_status_response(self):
+        from cron.models.responses import SchedulerStatusResponse
 
-        resp = TaskDeletedResponse(task_id="task_del")
-        assert resp.status == "cancelled"
-        assert "cancelled" in resp.message.lower()
+        resp = SchedulerStatusResponse(
+            running=True,
+            tick_interval_seconds=30,
+            total_schedules=3,
+            active_schedules=2,
+        )
+        assert resp.running is True
+        assert resp.total_schedules == 3
+
+    def test_manual_trigger_response(self):
+        from cron.models.responses import ManualTriggerResponse
+
+        resp = ManualTriggerResponse(
+            schedule_name="test",
+            topic="test.topic",
+            published=True,
+        )
+        assert resp.published is True
+        assert resp.error is None
 
 
 # ================================================================== #
-# 4. Event Model Tests
+# 5. Configuration Tests
 # ================================================================== #
 
 
-class TestEventModels:
-    """Test event model construction."""
+class TestConfiguration:
+    """Test settings and schedule loading."""
 
-    def test_task_dispatched_event(self):
-        from cron.models.events import TaskDispatchedEvent
+    def test_default_schedules(self):
+        from cron.config.settings import DEFAULT_SCHEDULES
 
-        event = TaskDispatchedEvent(
-            event_id="evt_001",
-            task_id="task_001",
-            user_id="usr_001",
-            channel="telegram",
-            owner_service="test",
+        assert len(DEFAULT_SCHEDULES) >= 2
+        names = [s["name"] for s in DEFAULT_SCHEDULES]
+        assert "relationship-decay" in names
+
+    def test_schedule_entry_config(self):
+        from cron.config.settings import ScheduleEntryConfig
+
+        cfg = ScheduleEntryConfig(
+            name="test",
+            cron_expression="0 3 * * *",
+            topic="test.topic",
         )
-        assert event.event_type == "cron.task.dispatched"
-        assert event.schema_version == "2.0"
-
-    def test_task_failed_event(self):
-        from cron.models.events import TaskFailedEvent
-
-        event = TaskFailedEvent(
-            event_id="evt_002",
-            task_id="task_002",
-            user_id="usr_002",
-            owner_service="test",
-            error="Connection refused",
-            retry_count=3,
-        )
-        assert event.event_type == "cron.task.failed"
-        assert event.retry_count == 3
-
-    def test_outbound_message_payload(self):
-        from cron.models.events import OutboundMessagePayload
-
-        payload = OutboundMessagePayload(
-            event_id="evt_003",
-            task_id="task_003",
-            user_id="usr_003",
-            channel="whatsapp",
-            content="Hello from ECHO!",
-        )
-        assert payload.event_id == "evt_003"
-        assert payload.message_type == "text"
+        assert cfg.name == "test"
+        assert cfg.enabled is True
 
 
 # ================================================================== #
-# 5. API Route Tests (via TestClient)
+# 6. API Route Tests (via TestClient)
 # ================================================================== #
 
 
@@ -386,7 +299,6 @@ class TestHealthRoutes:
     """Test health check endpoints."""
 
     def setup_method(self):
-        """Create a minimal test app with only health routes."""
         from fastapi import FastAPI
         from cron.routes.health_routes import router
 
@@ -407,79 +319,65 @@ class TestHealthRoutes:
         assert data["status"] == "ready"
 
 
-class TestTaskRouteValidation:
-    """Test task route request validation (without actual DB Service)."""
+class TestSchedulerIntegration:
+    """Test CronScheduler without real broker."""
 
-    def setup_method(self):
-        """Create a test app with task routes and a mock TaskService."""
-        from fastapi import FastAPI
-        from cron.routes.task_routes import router, get_task_service
-        from cron.services.task_service import TaskService
-        from cron.services.db_client import DatabaseServiceClient
+    def test_load_schedules(self):
+        from cron.config.settings import ScheduleEntryConfig
+        from cron.events.publisher import EventPublisher
+        from cron.services.scheduler import CronScheduler
 
-        self.app = FastAPI()
-        self.app.include_router(router)
-
-        # Create a TaskService with a dummy DB client (won't actually call)
-        self.mock_db = DatabaseServiceClient(base_url="http://fake:9999")
-        self.mock_service = TaskService(db_client=self.mock_db)
-
-        # Override dependency
-        self.app.dependency_overrides[get_task_service] = lambda: self.mock_service
-        self.client = TestClient(self.app)
-
-    def test_register_task_validation_missing_fields(self):
-        """Missing required fields should return 422."""
-        resp = self.client.post("/api/v1/tasks", json={})
-        assert resp.status_code == 422
-
-    def test_register_task_validation_valid_body(self):
-        """Valid body should not return 422 (may fail at DB level)."""
-        body = {
-            "owner_service": "test",
-            "task_type": "one_time",
-            "channel": "telegram",
-            "user_id": "usr_001",
-            "payload": {"message_type": "text", "content": "Hello"},
-            "schedule_config": {
-                "scheduled_at": "2026-04-01T09:00:00Z",
-            },
-        }
-        resp = self.client.post("/api/v1/tasks", json=body)
-        # Should pass validation (422 would mean validation failed)
-        # May get 400 because DB client fails, which is expected
-        assert resp.status_code != 422
-
-    def test_list_tasks_default_params(self):
-        """List tasks should accept default params (DB may fail)."""
-        resp = self.client.get("/api/v1/tasks")
-        # Returns 200 with empty list since DB client returns ([], 0) on error
-        assert resp.status_code == 200
-
-    def test_get_task_not_found(self):
-        """Get non-existent task should return 404."""
-        resp = self.client.get("/api/v1/tasks/nonexistent_id")
-        assert resp.status_code == 404
-
-    def test_delete_task_not_found(self):
-        """Delete non-existent task should return 404."""
-        resp = self.client.delete("/api/v1/tasks/nonexistent_id")
-        assert resp.status_code == 404
-
-    def test_update_task_not_found(self):
-        """Update non-existent task should return 404."""
-        resp = self.client.put(
-            "/api/v1/tasks/nonexistent_id",
-            json={"max_retries": 5},
+        publisher = EventPublisher(
+            broker_url="http://fake:9999",
+            enabled=False,
         )
-        assert resp.status_code == 404
+        scheduler = CronScheduler(publisher=publisher, tick_interval_seconds=60)
 
-    def test_pause_task_not_found(self):
-        """Pause non-existent task should return 400."""
-        resp = self.client.post("/api/v1/tasks/nonexistent_id/pause")
-        assert resp.status_code == 400
+        configs = [
+            ScheduleEntryConfig(
+                name="test-decay",
+                cron_expression="0 3 * * *",
+                topic="relationship.decay.requested",
+            ),
+            ScheduleEntryConfig(
+                name="test-compact",
+                cron_expression="0 4 * * 0",
+                topic="memory.compaction.requested",
+                enabled=False,
+            ),
+        ]
+        scheduler.load_schedules(configs)
 
-    def test_resume_task_not_found(self):
-        """Resume non-existent task should return 400."""
-        resp = self.client.post("/api/v1/tasks/nonexistent_id/resume")
-        assert resp.status_code == 400
+        entries = scheduler.get_schedules()
+        assert len(entries) == 2
+
+        decay = scheduler.get_schedule("test-decay")
+        assert decay is not None
+        assert decay.topic == "relationship.decay.requested"
+        assert decay.next_fire_at is not None
+        assert decay.enabled is True
+
+        compact = scheduler.get_schedule("test-compact")
+        assert compact is not None
+        assert compact.enabled is False
+
+    def test_get_status(self):
+        from cron.events.publisher import EventPublisher
+        from cron.services.scheduler import CronScheduler
+
+        publisher = EventPublisher(broker_url="http://fake:9999", enabled=False)
+        scheduler = CronScheduler(publisher=publisher)
+
+        status = scheduler.get_status()
+        assert status["running"] is False
+        assert status["total_schedules"] == 0
+        assert status["active_schedules"] == 0
+
+    def test_get_schedule_not_found(self):
+        from cron.events.publisher import EventPublisher
+        from cron.services.scheduler import CronScheduler
+
+        publisher = EventPublisher(broker_url="http://fake:9999", enabled=False)
+        scheduler = CronScheduler(publisher=publisher)
+
+        assert scheduler.get_schedule("nonexistent") is None

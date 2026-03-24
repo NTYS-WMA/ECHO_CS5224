@@ -1,59 +1,83 @@
 """
-Polling scheduler engine for the Cron Service v2.0.
+Scheduler engine for the Cron Service v3.0.
 
-Implements an internal polling loop that periodically queries the
-Database Service for due tasks (next_run_at <= now, status = scheduled)
-and dispatches them through the TaskExecutor.
-
-The scheduler runs as a background asyncio task within the FastAPI
-application lifecycle.
+A lightweight background loop that:
+1. Maintains a table of schedule entries with their next fire times.
+2. On each tick, checks which schedules are due (next_fire_at <= now).
+3. Publishes the corresponding event to the broker via EventPublisher.
+4. Recomputes next_fire_at for the schedule.
 """
 
 import asyncio
 import logging
-import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from ..models.responses import PollCycleResponse, PollExecutionResult
-from ..utils.helpers import generate_poll_id, utc_now
-from .db_client import DatabaseServiceClient
-from .task_executor import TaskExecutor
+from ..config.settings import ScheduleEntryConfig
+from ..events.publisher import EventPublisher
+from ..models.domain import ScheduleEntry
+from ..models.events import CronTriggeredEvent
+from ..models.responses import ManualTriggerResponse
+from ..utils.helpers import compute_next_run_at, generate_event_id, utc_now
 
 logger = logging.getLogger(__name__)
 
 
-class PollingScheduler:
+class CronScheduler:
     """
-    Background polling engine that discovers and executes due tasks.
-
-    Lifecycle:
-        start() → runs poll loop in background → stop()
+    Lightweight cron scheduler that publishes events on schedule.
     """
 
     def __init__(
         self,
-        db_client: DatabaseServiceClient,
-        executor: TaskExecutor,
-        poll_interval_seconds: int = 30,
-        max_tasks_per_poll: int = 100,
+        publisher: EventPublisher,
+        tick_interval_seconds: int = 30,
     ):
-        """
-        Initialize the PollingScheduler.
-
-        Args:
-            db_client: HTTP client for the Database Service.
-            executor: TaskExecutor for dispatching individual tasks.
-            poll_interval_seconds: Seconds between poll cycles.
-            max_tasks_per_poll: Max tasks to process per cycle.
-        """
-        self._db = db_client
-        self._executor = executor
-        self._poll_interval = poll_interval_seconds
-        self._max_tasks = max_tasks_per_poll
+        self._publisher = publisher
+        self._tick_interval = tick_interval_seconds
+        self._schedules: Dict[str, ScheduleEntry] = {}
         self._running = False
         self._task: Optional[asyncio.Task] = None
-        self._last_poll_at: Optional[datetime] = None
+        self._last_tick_at: Optional[datetime] = None
+
+    # ------------------------------------------------------------------ #
+    # Schedule management
+    # ------------------------------------------------------------------ #
+
+    def load_schedules(self, configs: List[ScheduleEntryConfig]) -> None:
+        """Load schedule entries from configuration and compute initial fire times."""
+        now = utc_now()
+        for cfg in configs:
+            next_fire = compute_next_run_at(
+                cron_expression=cfg.cron_expression,
+                interval_seconds=cfg.interval_seconds,
+                from_time=now,
+            )
+            entry = ScheduleEntry(
+                name=cfg.name,
+                cron_expression=cfg.cron_expression,
+                interval_seconds=cfg.interval_seconds,
+                topic=cfg.topic,
+                payload=cfg.payload,
+                enabled=cfg.enabled,
+                next_fire_at=next_fire,
+            )
+            self._schedules[cfg.name] = entry
+            logger.info(
+                "Loaded schedule '%s' → topic=%s, next_fire_at=%s, enabled=%s",
+                cfg.name,
+                cfg.topic,
+                next_fire.isoformat() if next_fire else "N/A",
+                cfg.enabled,
+            )
+
+    def get_schedules(self) -> List[ScheduleEntry]:
+        """Return all schedule entries."""
+        return list(self._schedules.values())
+
+    def get_schedule(self, name: str) -> Optional[ScheduleEntry]:
+        """Return a single schedule entry by name."""
+        return self._schedules.get(name)
 
     # ------------------------------------------------------------------ #
     # Properties
@@ -61,39 +85,35 @@ class PollingScheduler:
 
     @property
     def running(self) -> bool:
-        """Whether the scheduler is currently running."""
         return self._running
 
     @property
-    def poll_interval_seconds(self) -> int:
-        """Configured polling interval."""
-        return self._poll_interval
+    def tick_interval_seconds(self) -> int:
+        return self._tick_interval
 
     @property
-    def last_poll_at(self) -> Optional[datetime]:
-        """Timestamp of the last completed poll cycle."""
-        return self._last_poll_at
+    def last_tick_at(self) -> Optional[datetime]:
+        return self._last_tick_at
 
     # ------------------------------------------------------------------ #
     # Start / Stop
     # ------------------------------------------------------------------ #
 
     async def start(self) -> None:
-        """Start the background polling loop."""
+        """Start the background tick loop."""
         if self._running:
             logger.warning("Scheduler is already running.")
             return
-
         self._running = True
-        self._task = asyncio.create_task(self._poll_loop())
+        self._task = asyncio.create_task(self._tick_loop())
         logger.info(
-            "Polling scheduler started (interval=%ds, max_tasks=%d).",
-            self._poll_interval,
-            self._max_tasks,
+            "Cron scheduler started (tick_interval=%ds, schedules=%d).",
+            self._tick_interval,
+            len(self._schedules),
         )
 
     async def stop(self) -> None:
-        """Stop the background polling loop gracefully."""
+        """Stop the background tick loop."""
         self._running = False
         if self._task is not None:
             self._task.cancel()
@@ -102,170 +122,131 @@ class PollingScheduler:
             except asyncio.CancelledError:
                 pass
             self._task = None
-        logger.info("Polling scheduler stopped.")
+        logger.info("Cron scheduler stopped.")
 
     # ------------------------------------------------------------------ #
-    # Poll Loop
+    # Tick loop
     # ------------------------------------------------------------------ #
 
-    async def _poll_loop(self) -> None:
-        """
-        Main polling loop.
-
-        Runs indefinitely until stop() is called, sleeping between cycles.
-        """
+    async def _tick_loop(self) -> None:
+        """Main loop: check due schedules on each tick."""
         while self._running:
             try:
-                await self._execute_poll_cycle(self._max_tasks)
+                await self._tick()
             except Exception as e:
-                logger.error("Poll cycle failed unexpectedly: %s", str(e))
-
-            # Sleep until next cycle
+                logger.error("Tick failed: %s", str(e))
             try:
-                await asyncio.sleep(self._poll_interval)
+                await asyncio.sleep(self._tick_interval)
             except asyncio.CancelledError:
                 break
 
-    # ------------------------------------------------------------------ #
-    # Single Poll Cycle
-    # ------------------------------------------------------------------ #
-
-    async def _execute_poll_cycle(
-        self, max_tasks: int
-    ) -> PollCycleResponse:
-        """
-        Execute a single poll cycle.
-
-        1. Query Database Service for due tasks.
-        2. Execute each task via TaskExecutor.
-        3. Return aggregated results.
-
-        Args:
-            max_tasks: Maximum number of due tasks to process.
-
-        Returns:
-            PollCycleResponse with per-task results.
-        """
-        poll_id = generate_poll_id()
-        start_time = time.monotonic()
+    async def _tick(self) -> None:
+        """Single tick: find due schedules and fire them."""
         now = utc_now()
+        self._last_tick_at = now
+        fired = 0
 
-        logger.debug("Poll cycle %s started.", poll_id)
+        for entry in self._schedules.values():
+            if not entry.enabled:
+                continue
+            if entry.next_fire_at is None:
+                continue
+            if entry.next_fire_at > now:
+                continue
 
-        # Query due tasks from Database Service
-        due_tasks = await self._db.query_due_tasks(now=now, max_tasks=max_tasks)
-        tasks_found = len(due_tasks)
+            # Schedule is due — fire it
+            success = await self._fire_schedule(entry, now)
+            if success:
+                fired += 1
 
-        if tasks_found == 0:
-            self._last_poll_at = now
-            duration_ms = (time.monotonic() - start_time) * 1000
-            logger.debug("Poll cycle %s: no due tasks.", poll_id)
-            return PollCycleResponse(
-                poll_id=poll_id,
-                tasks_found=0,
-                tasks_dispatched=0,
-                tasks_failed=0,
-                results=[],
-                duration_ms=round(duration_ms, 2),
+            # Recompute next fire time regardless of success
+            entry.next_fire_at = compute_next_run_at(
+                cron_expression=entry.cron_expression,
+                interval_seconds=entry.interval_seconds,
+                from_time=now,
+            )
+            entry.last_fired_at = now
+
+        if fired > 0:
+            logger.info("Tick completed: %d schedule(s) fired.", fired)
+
+    async def _fire_schedule(
+        self, entry: ScheduleEntry, now: datetime
+    ) -> bool:
+        """Publish the event for a due schedule entry."""
+        event = CronTriggeredEvent(
+            event_id=generate_event_id(),
+            event_type=entry.topic,
+            schedule_name=entry.name,
+            payload=entry.payload,
+        )
+        success = await self._publisher.publish(
+            topic=entry.topic,
+            payload=event.model_dump(mode="json"),
+        )
+        if success:
+            logger.info(
+                "Schedule '%s' fired → topic=%s (event_id=%s).",
+                entry.name,
+                entry.topic,
+                event.event_id,
+            )
+        else:
+            logger.error(
+                "Schedule '%s' failed to publish to topic=%s.",
+                entry.name,
+                entry.topic,
+            )
+        return success
+
+    # ------------------------------------------------------------------ #
+    # Manual trigger
+    # ------------------------------------------------------------------ #
+
+    async def trigger(
+        self,
+        schedule_name: str,
+        payload_override: Optional[Dict[str, Any]] = None,
+    ) -> ManualTriggerResponse:
+        """Manually trigger a schedule (for ops/testing)."""
+        entry = self._schedules.get(schedule_name)
+        if entry is None:
+            return ManualTriggerResponse(
+                schedule_name=schedule_name,
+                topic="",
+                published=False,
+                error=f"Schedule '{schedule_name}' not found.",
             )
 
-        logger.info("Poll cycle %s: found %d due tasks.", poll_id, tasks_found)
-
-        # Execute each task
-        results: List[PollExecutionResult] = []
-        dispatched = 0
-        failed = 0
-
-        for task in due_tasks:
-            try:
-                outcome = await self._executor.execute(task)
-                success = outcome.get("success", False)
-                error = outcome.get("error")
-
-                results.append(PollExecutionResult(
-                    task_id=task.task_id,
-                    success=success,
-                    error=error,
-                ))
-
-                if success:
-                    dispatched += 1
-                else:
-                    failed += 1
-
-            except Exception as e:
-                logger.error(
-                    "Unexpected error executing task %s: %s",
-                    task.task_id,
-                    str(e),
-                )
-                results.append(PollExecutionResult(
-                    task_id=task.task_id,
-                    success=False,
-                    error=str(e),
-                ))
-                failed += 1
-
-        self._last_poll_at = now
-        duration_ms = (time.monotonic() - start_time) * 1000
-
-        logger.info(
-            "Poll cycle %s completed: %d found, %d dispatched, %d failed (%.1fms).",
-            poll_id,
-            tasks_found,
-            dispatched,
-            failed,
-            duration_ms,
+        event = CronTriggeredEvent(
+            event_id=generate_event_id(),
+            event_type=entry.topic,
+            schedule_name=entry.name,
+            payload=payload_override if payload_override is not None else entry.payload,
         )
-
-        return PollCycleResponse(
-            poll_id=poll_id,
-            tasks_found=tasks_found,
-            tasks_dispatched=dispatched,
-            tasks_failed=failed,
-            results=results,
-            duration_ms=round(duration_ms, 2),
+        success = await self._publisher.publish(
+            topic=entry.topic,
+            payload=event.model_dump(mode="json"),
         )
-
-    # ------------------------------------------------------------------ #
-    # Manual Trigger (for ops / testing)
-    # ------------------------------------------------------------------ #
-
-    async def trigger_poll(self, max_tasks: int = 100) -> PollCycleResponse:
-        """
-        Manually trigger a single poll cycle.
-
-        Used for testing and operational purposes. Does not affect
-        the background polling loop schedule.
-
-        Args:
-            max_tasks: Maximum number of due tasks to process.
-
-        Returns:
-            PollCycleResponse with per-task results.
-        """
-        logger.info("Manual poll trigger requested (max_tasks=%d).", max_tasks)
-        return await self._execute_poll_cycle(max_tasks)
+        return ManualTriggerResponse(
+            schedule_name=schedule_name,
+            topic=entry.topic,
+            published=success,
+            error=None if success else "Failed to publish event.",
+        )
 
     # ------------------------------------------------------------------ #
     # Status
     # ------------------------------------------------------------------ #
 
-    async def get_status(self) -> Dict[str, Any]:
-        """
-        Get scheduler status including task counts.
-
-        Returns:
-            Dict with running state, interval, last_poll_at, and task counts.
-        """
-        # Get counts from DB Service
-        pending_count = await self._db.count_tasks_by_status("scheduled")
-        executing_count = await self._db.count_tasks_by_status("executing")
-
+    def get_status(self) -> Dict[str, Any]:
+        """Return scheduler status."""
+        total = len(self._schedules)
+        active = sum(1 for s in self._schedules.values() if s.enabled)
         return {
             "running": self._running,
-            "poll_interval_seconds": self._poll_interval,
-            "last_poll_at": self._last_poll_at,
-            "tasks_pending": pending_count,
-            "tasks_executing": executing_count,
+            "tick_interval_seconds": self._tick_interval,
+            "total_schedules": total,
+            "active_schedules": active,
+            "last_tick_at": self._last_tick_at,
         }

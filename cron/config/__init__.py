@@ -1,3 +1,5 @@
-from .settings import Settings, get_settings
+"""Configuration module for the Cron Service."""
 
-__all__ = ["Settings", "get_settings"]
+from .settings import ScheduleEntryConfig, Settings, get_settings
+
+__all__ = ["ScheduleEntryConfig", "Settings", "get_settings"]

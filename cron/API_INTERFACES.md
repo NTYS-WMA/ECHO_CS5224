@@ -1,282 +1,89 @@
-# Cron Service — API Interface Reference v2.0
+# Cron Service v3.0 — API Reference
 
-> This document defines all HTTP APIs exposed by the Cron Service.
-> Other modules should reference this document when integrating with this service.
+## 1. Overview
 
-**Version**: 2.0
-**Last Updated**: 2026-03-23
-**Maintained by**: Cron Service Team
+The Cron Service is a lightweight global time-trigger.  It maintains a
+schedule table and publishes events to the internal messaging layer when
+schedules fire.  It has **no database**, **no task CRUD**, and **no message
+dispatch** responsibilities.
 
----
+### Integration Points
 
-## Table of Contents
-
-1. [Service Overview](#1-service-overview)
-2. [Access Information](#2-access-information)
-3. [Task Management APIs](#3-task-management-apis)
-4. [Scheduler Control APIs](#4-scheduler-control-apis)
-5. [Health Check APIs](#5-health-check-apis)
-6. [Published Events](#6-published-events)
-7. [Error Handling](#7-error-handling)
+| Direction | Service | Protocol |
+|-----------|---------|----------|
+| Outbound | Event Broker | HTTP POST `/api/v1/events` |
 
 ---
 
-## 1. Service Overview
+## 2. Schedule APIs
 
-The Cron Service v2.0 is a **scheduled task management and polling engine** for proactive outbound messaging in the ECHO platform. It provides:
+Base URL: `http://localhost:8005`
 
-- **Task CRUD APIs** for service registrants to register, query, update, pause, resume, and cancel scheduled message tasks.
-- **Internal polling scheduler** that periodically discovers due tasks and dispatches them to the Message Dispatch Hub.
-- **Event publishing** for task lifecycle telemetry.
-
-The service does **not** own business logic for candidate selection or prompt assembly. Business callers decide **who** to message, **what** to say, and **when** to send. This service stores the task, triggers it on schedule, and dispatches it.
-
-**Key integrations**:
-
-| Dependency | Role |
-|------------|------|
-| Database Service | Persistent storage for all scheduled tasks (via HTTP API) |
-| Message Dispatch Hub | Outbound message delivery (via HTTP API) |
-| Internal Messaging Layer | Event publishing for telemetry |
-
----
-
-## 2. Access Information
-
-**Base URL** (internal network):
+### 2.1 List Schedules
 
 ```
-http://<host>:8002
+GET /api/v1/schedules
 ```
-
-**Protocol**: HTTP/1.1, JSON request and response bodies, `Content-Type: application/json`.
-
-**Interactive Docs**: `http://<host>:8002/docs` (Swagger UI)
-
----
-
-## 3. Task Management APIs
-
-### 3.1 Register Task — `POST /api/v1/tasks`
-
-Create a new scheduled message task.
-
-**Caller**: Any service registrant (e.g., Relationship Service, Conversation Orchestrator).
-
-**Request Body**:
-
-```json
-{
-  "owner_service": "relationship-service",
-  "task_type": "one_time",
-  "channel": "telegram",
-  "user_id": "usr_001",
-  "conversation_id": "conv_abc",
-  "payload": {
-    "message_type": "text",
-    "content": "Hey, how have you been?",
-    "template_id": null,
-    "template_variables": null,
-    "metadata": {}
-  },
-  "schedule_config": {
-    "scheduled_at": "2026-04-01T09:00:00Z",
-    "cron_expression": null,
-    "interval_seconds": null,
-    "timezone": "UTC",
-    "expires_at": null
-  },
-  "max_retries": 3,
-  "priority": 5,
-  "tags": ["re-engagement", "high-affinity"]
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `owner_service` | string | Yes | Name of the registrant service |
-| `task_type` | enum | Yes | `one_time` or `recurring` |
-| `channel` | string | Yes | Delivery channel (`telegram`, `whatsapp`, `web`) |
-| `user_id` | string | Yes | Target user ID |
-| `conversation_id` | string | No | Conversation context ID |
-| `payload.message_type` | enum | Yes | `text` (raw content) or `template` (AI Generation template) |
-| `payload.content` | string | Conditional | Required when `message_type=text` |
-| `payload.template_id` | string | Conditional | Required when `message_type=template` |
-| `payload.template_variables` | object | No | Variables for template rendering |
-| `payload.metadata` | object | No | Arbitrary metadata passed to dispatch |
-| `schedule_config.scheduled_at` | datetime | Conditional | For one-time tasks |
-| `schedule_config.cron_expression` | string | Conditional | For recurring tasks (standard 5-field cron) |
-| `schedule_config.interval_seconds` | integer | Conditional | For recurring tasks (min: 60) |
-| `schedule_config.timezone` | string | No | IANA timezone (default: `UTC`) |
-| `schedule_config.expires_at` | datetime | No | Auto-cancel after this time |
-| `max_retries` | integer | No | Max retry attempts on failure (default: 3) |
-| `priority` | integer | No | Priority 1-10, lower = higher (default: 5) |
-| `tags` | list[string] | No | Tags for filtering and analytics |
-
-**Response `201 Created`**:
-
-```json
-{
-  "task_id": "task_a1b2c3d4e5f6",
-  "owner_service": "relationship-service",
-  "task_type": "one_time",
-  "status": "scheduled",
-  "channel": "telegram",
-  "user_id": "usr_001",
-  "payload": { "..." },
-  "schedule_config": { "..." },
-  "next_run_at": "2026-04-01T09:00:00Z",
-  "retry_count": 0,
-  "max_retries": 3,
-  "priority": 5,
-  "tags": ["re-engagement", "high-affinity"],
-  "created_at": "2026-03-22T18:00:00Z",
-  "updated_at": "2026-03-22T18:00:00Z"
-}
-```
-
----
-
-### 3.2 List Tasks — `GET /api/v1/tasks`
-
-Query tasks with filtering and pagination.
-
-**Query Parameters**:
-
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `owner_service` | string | — | Filter by registrant service |
-| `status` | string | — | Filter by status (`scheduled`, `paused`, `executing`, etc.) |
-| `user_id` | string | — | Filter by target user |
-| `channel` | string | — | Filter by channel |
-| `tag` | string | — | Filter by tag |
-| `page` | integer | 1 | Page number |
-| `page_size` | integer | 20 | Items per page (max: 100) |
 
 **Response `200 OK`**:
 
 ```json
 {
-  "tasks": [ { "...TaskResponse..." } ],
-  "total": 42,
-  "page": 1,
-  "page_size": 20
+  "schedules": [
+    {
+      "name": "relationship-decay",
+      "cron_expression": "0 3 * * *",
+      "interval_seconds": null,
+      "topic": "relationship.decay.requested",
+      "payload": {},
+      "enabled": true,
+      "next_fire_at": "2026-03-25T03:00:00Z",
+      "last_fired_at": "2026-03-24T03:00:00Z"
+    }
+  ],
+  "total": 1
 }
 ```
 
----
+### 2.2 Get Schedule
 
-### 3.3 Get Task — `GET /api/v1/tasks/{task_id}`
-
-Retrieve a single task by ID.
-
-**Response `200 OK`**: Full `TaskResponse` object.
-
-**Response `404 Not Found`**:
-
-```json
-{ "detail": "Task not found: task_xxx" }
+```
+GET /api/v1/schedules/{schedule_name}
 ```
 
----
+**Response `200 OK`**: Single `ScheduleEntryResponse` object.
 
-### 3.4 Update Task — `PUT /api/v1/tasks/{task_id}`
+**Response `404`**: Schedule not found.
 
-Partial update of a task's payload, schedule, or configuration.
+### 2.3 Scheduler Status
 
-**Request Body (all fields optional)**:
-
-```json
-{
-  "payload": { "message_type": "text", "content": "Updated message" },
-  "schedule_config": { "cron_expression": "0 10 * * 1-5" },
-  "max_retries": 5,
-  "priority": 3,
-  "tags": ["updated-tag"]
-}
 ```
-
-**Response `200 OK`**: Updated `TaskResponse` object.
-
-**Response `404 Not Found`**: Task does not exist.
-
----
-
-### 3.5 Delete (Cancel) Task — `DELETE /api/v1/tasks/{task_id}`
-
-Soft-deletes a task by setting its status to `cancelled`.
-
-**Response `200 OK`**:
-
-```json
-{
-  "task_id": "task_xxx",
-  "status": "cancelled",
-  "message": "Task task_xxx has been cancelled."
-}
+GET /api/v1/scheduler/status
 ```
-
-**Response `404 Not Found`**: Task does not exist.
-
----
-
-### 3.6 Pause Task — `POST /api/v1/tasks/{task_id}/pause`
-
-Pause a scheduled or recurring task. The task will not be picked up by the polling scheduler while paused.
-
-**Response `200 OK`**: Updated `TaskResponse` with `status=paused`.
-
-**Response `400 Bad Request`**: Task not found or not in a pausable state.
-
----
-
-### 3.7 Resume Task — `POST /api/v1/tasks/{task_id}/resume`
-
-Resume a previously paused task.
-
-**Response `200 OK`**: Updated `TaskResponse` with `status=scheduled`.
-
-**Response `400 Bad Request`**: Task not found or not in a resumable state.
-
----
-
-## 4. Scheduler Control APIs
-
-### 4.1 Get Scheduler Status — `GET /api/v1/scheduler/status`
-
-Returns the current state of the polling engine.
 
 **Response `200 OK`**:
 
 ```json
 {
   "running": true,
-  "poll_interval_seconds": 30,
-  "last_poll_at": "2026-03-22T18:30:00Z",
-  "tasks_pending": 15,
-  "tasks_executing": 2
+  "tick_interval_seconds": 30,
+  "total_schedules": 2,
+  "active_schedules": 2,
+  "last_tick_at": "2026-03-24T12:00:00Z"
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `running` | boolean | Whether the background scheduler is active |
-| `poll_interval_seconds` | integer | Configured polling interval |
-| `last_poll_at` | datetime | Timestamp of the last completed poll cycle |
-| `tasks_pending` | integer | Tasks in `scheduled` status |
-| `tasks_executing` | integer | Tasks currently being executed |
+### 2.4 Manual Trigger
 
----
+```
+POST /api/v1/scheduler/trigger/{schedule_name}
+```
 
-### 4.2 Manual Poll Trigger — `POST /api/v1/scheduler/trigger`
-
-Trigger a single poll cycle manually (for testing / ops). Does not affect the background polling loop schedule.
-
-**Request Body (optional)**:
+**Request body** (optional):
 
 ```json
 {
-  "max_tasks": 50
+  "payload_override": {"custom": "data"}
 }
 ```
 
@@ -284,29 +91,38 @@ Trigger a single poll cycle manually (for testing / ops). Does not affect the ba
 
 ```json
 {
-  "poll_id": "poll_abc123",
-  "tasks_found": 5,
-  "tasks_dispatched": 4,
-  "tasks_failed": 1,
-  "results": [
-    { "task_id": "task_001", "success": true, "error": null },
-    { "task_id": "task_002", "success": false, "error": "dispatch timeout" }
-  ],
-  "duration_ms": 245.3
+  "schedule_name": "relationship-decay",
+  "topic": "relationship.decay.requested",
+  "published": true,
+  "error": null
 }
 ```
 
+**Response `404`**: Schedule not found.
+
 ---
 
-## 5. Health Check APIs
+## 3. Health APIs
 
-### 5.1 Liveness — `GET /health`
+### 3.1 Liveness
+
+```
+GET /health
+```
+
+**Response `200 OK`**:
 
 ```json
 { "status": "healthy", "service": "cron-service" }
 ```
 
-### 5.2 Readiness — `GET /ready`
+### 3.2 Readiness
+
+```
+GET /ready
+```
+
+**Response `200 OK`**:
 
 ```json
 { "status": "ready", "service": "cron-service" }
@@ -314,55 +130,40 @@ Trigger a single poll cycle manually (for testing / ops). Does not affect the ba
 
 ---
 
-## 6. Published Events
+## 4. Published Events
 
-Events published to the Internal Messaging Layer for downstream consumers.
+When a schedule fires, an event is published to the broker.
 
-### 6.1 `cron.task.dispatched`
-
-Published when a task is successfully dispatched to the Message Dispatch Hub.
+### Event Envelope
 
 ```json
 {
-  "event_type": "cron.task.dispatched",
-  "event_id": "evt_xxx",
-  "task_id": "task_xxx",
-  "user_id": "usr_xxx",
-  "channel": "telegram",
-  "owner_service": "relationship-service",
-  "dispatched_at": "2026-03-22T18:30:00Z",
-  "schema_version": "2.0"
+  "event_id": "evt_abc123def456",
+  "event_type": "<topic>",
+  "source": "cron-service",
+  "schema_version": "3.0",
+  "timestamp": "2026-03-24T03:00:00Z",
+  "schedule_name": "<schedule-name>",
+  "payload": {}
 }
 ```
 
-### 6.2 `cron.task.failed`
+### Default Topics
 
-Published when a task exhausts all retries and fails permanently.
+| Topic | Schedule | Frequency |
+|-------|----------|-----------|
+| `relationship.decay.requested` | `relationship-decay` | Daily 03:00 UTC |
+| `memory.compaction.requested` | `memory-compaction` | Weekly Sun 04:00 UTC |
 
-```json
-{
-  "event_type": "cron.task.failed",
-  "event_id": "evt_xxx",
-  "task_id": "task_xxx",
-  "user_id": "usr_xxx",
-  "owner_service": "relationship-service",
-  "error": "Message Dispatch Hub returned 503",
-  "retry_count": 3,
-  "failed_at": "2026-03-22T18:30:00Z",
-  "schema_version": "2.0"
-}
-```
-
-> **Note**: The Cron Service does **not** publish `conversation.outbound` events.
-> Outbound message delivery is handled entirely via HTTP to the Message Dispatch
-> Hub. The `conversation.outbound` event topic is owned exclusively by the
-> Channel Gateway Orchestrator for reactive replies.
+> **Note**: The Cron Service does **not** publish `conversation.outbound`
+> or any business-specific events.  It only fires generic time-trigger
+> events.  Business services subscribe to these and execute their own logic.
 
 ---
 
-## 7. Error Handling
+## 5. Error Handling
 
-All error responses follow a consistent format:
+All error responses follow:
 
 ```json
 {
@@ -372,9 +173,7 @@ All error responses follow a consistent format:
 
 | HTTP Status | Meaning |
 |-------------|---------|
-| 201 | Resource created successfully |
 | 200 | Request processed successfully |
-| 400 | Bad request or invalid state transition |
-| 404 | Resource not found |
+| 404 | Schedule not found |
 | 422 | Request body validation error |
 | 500 | Internal server error |
