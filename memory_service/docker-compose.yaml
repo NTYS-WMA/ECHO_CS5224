@@ -1,0 +1,132 @@
+services:
+  postgres:
+      image: ankane/pgvector:v0.5.1
+      restart: on-failure
+      shm_size: "128mb" # Increase this if vacuuming fails with a "no space left on device" error
+      networks:
+        - mem0_network
+      environment:
+        - POSTGRES_USER=postgres
+        - POSTGRES_PASSWORD=postgres
+      healthcheck:
+        test: ["CMD", "pg_isready", "-q", "-d", "postgres", "-U", "postgres"]
+        interval: 5s
+        timeout: 5s
+        retries: 5
+      volumes:
+        - postgres_db:/var/lib/postgresql/data
+      ports:
+        - "8432:5432"
+
+  mongodb:
+    image: mongo:7.0
+    container_name: mem0-mongodb
+    restart: on-failure
+    networks:
+      - mem0_network
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=mongo
+      - MONGO_INITDB_ROOT_PASSWORD=mongo
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
+
+  mem0-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+#      dockerfile: Dockerfile
+    container_name: mem0-api
+    ports:
+      - "18088:8000"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      # VolcEngine DeepSeek配置 (优先使用)
+      - VOLCENGINE_DEEPSEEK_API_KEY=${VOLCENGINE_DEEPSEEK_API_KEY}
+      - VOLCENGINE_DEEPSEEK_ENDPOINT_ID=${VOLCENGINE_DEEPSEEK_ENDPOINT_ID}
+      - VOLCENGINE_DEEPSEEK_BASE_URL=${VOLCENGINE_DEEPSEEK_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DOUBAO_API_KEY=${DOUBAO_API_KEY}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      # PostgreSQL配置
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_COLLECTION=memories
+      # MongoDB配置
+      - MONGODB_URI=mongodb://mongo:mongo@mongodb:27017/
+      - MONGODB_DATABASE=mem0
+      # PalServer配置 (冷启动)
+      - PALSERVER_BASE_URL=${PALSERVER_BASE_URL:-http://localhost:8099/pal}
+      - HISTORY_DB_PATH=/app/history/history.db
+      - EMBEDDING_MODEL_DIMS=1536
+      # Logging配置
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./history:/app/history
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    networks:
+      - mem0_network
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+
+  # SQLite 数据库查看工具 (可选)
+#  sqlite-web:
+#    image: coleifer/sqlite-web
+#    platform: linux/amd64  # 指定平台兼容ARM64
+#    container_name: mem0-sqlite-web
+#    ports:
+#      - "18089:8080"
+#    volumes:
+#      - ./history:/data
+#    command: ["sqlite_web", "/data/history.db", "--host", "0.0.0.0", "--port", "8080"]
+#    depends_on:
+#      - mem0-service
+#    networks:
+#      - mem0_network
+#    restart: unless-stopped
+
+#  neo4j:
+#    image: neo4j:5.26.4
+#    networks:
+#      - mem0_network
+#    healthcheck:
+#      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "mem0graph", "RETURN 1"]
+#      interval: 10s
+#      timeout: 10s
+#      retries: 20
+#      start_period: 90s
+#    ports:
+#      - "8474:7474" # HTTP
+#      - "8687:7687" # Bolt
+#    volumes:
+#      - neo4j_data:/data
+#    environment:
+#      - NEO4J_AUTH=neo4j/mem0graph
+#      - NEO4J_PLUGINS=["apoc"]  # Add this line to install APOC
+#      - NEO4J_apoc_export_file_enabled=true
+#      - NEO4J_apoc_import_file_enabled=true
+#      - NEO4J_apoc_import_file_use__neo4j__config=true
+
+volumes:
+  postgres_db:
+    driver: local
+  mongodb_data:
+    driver: local
+  neo4j_data:
+
+networks:
+  mem0_network:
+    driver: bridge

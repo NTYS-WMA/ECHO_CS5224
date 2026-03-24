@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  # PostgreSQL数据库 (替代Qdrant)
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mem0-postgres
+    environment:
+      POSTGRES_DB: mem0_db
+      POSTGRES_USER: mem0_user
+      POSTGRES_PASSWORD: mem0_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-pgvector.sql:/docker-entrypoint-initdb.d/init-pgvector.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mem0_user -d mem0_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mem0_network
+    restart: unless-stopped
+
+  # Mem0服务 (使用PostgreSQL配置)
+  mem0-service:
+    build:
+      context: .
+      dockerfile: ./server/Dockerfile
+    container_name: mem0-api
+    ports:
+      - "18088:8000"
+    environment:
+      # API Keys
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+
+      # PostgreSQL配置
+      - VECTOR_STORE_PROVIDER=pgvector
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=mem0_db
+      - POSTGRES_USER=mem0_user
+      - POSTGRES_PASSWORD=mem0_password
+      - POSTGRES_COLLECTION=memories
+
+      # 其他配置
+      - HISTORY_DB_PATH=/app/history/history.db
+      - EMBEDDING_MODEL_DIMS=1536
+    volumes:
+      - ./history:/app/history
+      - ./server/main_postgresql.py:/app/main.py  # 使用PostgreSQL配置的main文件
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mem0_network
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+
+  # PostgreSQL管理工具 (可选)
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: mem0-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@mem0.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "18090:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - mem0_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  mem0_network:
+    driver: bridge
