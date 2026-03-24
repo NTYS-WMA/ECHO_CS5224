@@ -79,6 +79,44 @@ class GenerationResponse(BaseModel):
 
 
 # ------------------------------------------------------------------ #
+# Embedding Response
+# ------------------------------------------------------------------ #
+
+
+class EmbeddingResponse(BaseModel):
+    """
+    Response body for POST /api/v1/generation/embeddings.
+
+    Returns the embedding vector and usage metadata.
+    """
+
+    response_id: str = Field(
+        ...,
+        description="Unique identifier for this embedding response.",
+        examples=["gen-emb-445"],
+    )
+    embedding: List[float] = Field(
+        ...,
+        description="The embedding vector.",
+    )
+    dimension: int = Field(
+        ...,
+        ge=1,
+        description="Dimensionality of the embedding vector.",
+        examples=[1024],
+    )
+    model: str = Field(
+        ...,
+        description="Model identifier used for embedding.",
+        examples=["amazon.titan-embed-text-v2:0"],
+    )
+    usage: UsageInfo = Field(
+        ...,
+        description="Token usage statistics.",
+    )
+
+
+# ------------------------------------------------------------------ #
 # Legacy Response Models (kept for backward compatibility)
 # ------------------------------------------------------------------ #
 
@@ -137,7 +175,7 @@ class ProactiveMessageResponse(BaseModel):
     """
     Response body for POST /api/v1/generation/proactive-messages.
 
-    Returned to: Proactive Engagement Service
+    Returned to: Cron Service
     """
 
     response_id: str = Field(
