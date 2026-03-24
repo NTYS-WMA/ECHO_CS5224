@@ -12,9 +12,9 @@ The AI Generation Service is the **AI execution engine** for the ECHO platform. 
                                   │                                      │
   Business Callers                │  ┌──────────────┐  ┌─────────────┐  │
   ─────────────────               │  │   Template    │  │  Template   │  │
-  Conversation Orchestrator ─────▶│  │   Manager     │  │  Renderer   │  │
-  Memory Service ────────────────▶│  │  (CRUD+Store) │  │ (Render)    │  │
-  Proactive Engagement ──────────▶│  └──────┬───────┘  └──────┬──────┘  │
+  Channel Gateway Orchestrator ──▶│  │   Manager     │  │  Renderer   │  │
+  (other business services) ─────▶│  │  (CRUD+Store) │  │ (Render)    │  │
+                                  │  └──────┬───────┘  └──────┬──────┘  │
                                   │         │                  │         │
                                   │         ▼                  ▼         │
                                   │  ┌──────────────────────────────┐   │
@@ -76,7 +76,6 @@ ai_generation_service/
 │   ├── fallback_provider.py           # OpenAI-compatible fallback provider
 │   ├── template_manager.py            # Template CRUD and storage
 │   ├── template_renderer.py           # Template rendering engine
-│   ├── prompt_builder.py              # DEPRECATED — replaced by template system
 │   ├── conversation_store_client.py   # Client for Conversation Persistence Store
 │   └── generation_service.py          # Core execution engine with retry/fallback
 ├── events/
@@ -105,19 +104,19 @@ ai_generation_service/
 
 ### Generation
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/v1/generation/execute` | **Primary** — Execute generation with template_id + variables/messages |
-| POST | `/api/v1/generation/chat-completions` | Legacy — Chat completion (deprecated) |
-| POST | `/api/v1/generation/summaries` | Legacy — Summary generation (deprecated) |
-| POST | `/api/v1/generation/proactive-messages` | Legacy — Proactive message (deprecated) |
+| Method | Endpoint | Description | Status |
+|--------|----------|-------------|--------|
+| POST | `/api/v1/generation/execute` | **Primary** — template_id + variables/messages | ✅ Implemented |
+| POST | `/api/v1/generation/chat-completions` | Legacy — chat completion | ✅ Active (called by Orchestrator) |
+| POST | `/api/v1/generation/summaries` | Legacy — summary generation | ⚠️ Implemented, no callers |
+| POST | `/api/v1/generation/proactive-messages` | Legacy — proactive message | ⚠️ Implemented, no callers |
 
 ### Health
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Liveness check |
-| GET | `/ready` | Readiness check |
+| Method | Endpoint | Description | Status |
+|--------|----------|-------------|--------|
+| GET | `/health` | Liveness check | ✅ Implemented |
+| GET | `/ready` | Readiness check | 🔶 Stub (always returns ready, no provider health check) |
 
 For detailed request/response schemas, see [API_INTERFACES.md](./API_INTERFACES.md).
 
@@ -175,10 +174,12 @@ print(response.json()["output"][0]["content"])
 
 ## Published Events
 
-| Topic | Description |
-|-------|-------------|
-| `ai.generation.completed` | Emitted for telemetry on successful generation |
-| `ai.generation.failed` | Emitted on hard generation failure |
+| Topic | Description | Status |
+|-------|-------------|--------|
+| `ai.generation.completed` | Emitted for telemetry on successful generation | 🔶 Stub |
+| `ai.generation.failed` | Emitted on hard generation failure | 🔶 Stub |
+
+> **Implementation Status**: Events are serialized correctly using Pydantic models, but `EventPublisher._publish()` currently only logs events — no real message broker is connected. Integration with a broker (Redis Streams / RabbitMQ / SQS) is pending infrastructure decisions. See `events/publisher.py`.
 
 ---
 
@@ -220,8 +221,21 @@ pytest ai_generation_service/tests/ -v
 
 | Service | Interface Type | Status |
 |---------|---------------|--------|
-| Conversation Persistence Store | HTTP API (read) | TO BE UPDATED |
-| Internal Messaging Layer | Event publish | TO BE UPDATED |
-| Amazon Bedrock | AWS SDK | Assumed (AWS) |
+| Amazon Bedrock | AWS SDK (Converse API) | ✅ Implemented (`bedrock_provider.py`). Requires boto3 + AWS credentials at deploy time |
+| Conversation Persistence Store | HTTP API (read messages) | 🔶 Client implemented (`conversation_store_client.py`), target endpoint assumed/unconfirmed |
+| Internal Messaging Layer | Event publish | 🔶 Stub — logs only, no broker connected (`events/publisher.py`) |
 
 For details on assumed interfaces, see [ASSUMED_INTERFACES.md](./ASSUMED_INTERFACES.md).
+
+---
+
+## Next Steps (TODO)
+
+| # | Task | Current Status | Dependency | Priority |
+|---|------|---------------|------------|----------|
+| 1 | Connect event publisher to real broker | Stub (log only) | Infra team to decide broker technology (Redis Streams / RabbitMQ / SQS) | High |
+| 2 | Add provider health check to `/ready` | Stub (always returns ready) | None | Medium |
+| 3 | Migrate Orchestrator to `/execute` endpoint | Orchestrator still uses `/chat-completions` | Orchestrator team coordination | Medium |
+| 4 | Confirm Conversation Store API contract | Client implemented, endpoint assumed | Platform/Data team to confirm endpoint | Medium |
+| 5 | Migrate template persistence to shared storage | Local JSON files | Choose storage backend (DynamoDB / MySQL / S3) | Low (single-instance works) |
+| 6 | Remove unused legacy endpoints | `/summaries`, `/proactive-messages` have no callers | Confirm no planned callers before removal | Low |

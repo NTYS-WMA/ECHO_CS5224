@@ -282,23 +282,72 @@ The **primary** generation endpoint. Business callers specify a `template_id` an
 
 ---
 
-### 4.2 Legacy Endpoints (Deprecated)
+### 4.2 Active Legacy: POST /api/v1/generation/chat-completions
 
-The following endpoints are maintained for backward compatibility. **New integrations should use `/execute` instead.** All legacy endpoints now accept an optional `template_id` field.
-
-#### POST /api/v1/generation/chat-completions
+> **Status**: ✅ Implemented and actively called by **Channel Gateway Orchestrator** (`ai_generation_client.py`). Maintain until Orchestrator migrates to `/execute`.
 
 Accepts a conversation message list and returns an AI-generated reply. If `template_id` is omitted, uses `tpl_chat_completion`.
 
+**Request Body**:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `user_id` | string | Yes | Internal user identifier |
+| `conversation_id` | string | Yes | Conversation identifier |
+| `messages` | array of `MessageItem` | Yes | Ordered conversation messages (min 1) |
+| `template_id` | string | No | Template ID to use (default: `tpl_chat_completion`) |
+| `generation_config` | GenerationConfig | No | Override generation parameters |
+| `correlation_id` | string | No | Correlation ID for tracing |
+
+**Request Example**:
+
+```json
+{
+  "user_id": "usr_9f2a7c41",
+  "conversation_id": "telegram-chat-123456789",
+  "messages": [
+    {"role": "system", "content": "You are ECHO, a warm companion."},
+    {"role": "user", "content": "Hey ECHO!"}
+  ],
+  "generation_config": {
+    "temperature": 0.7,
+    "max_tokens": 200
+  },
+  "correlation_id": "evt-001"
+}
+```
+
+**Response** `200 OK`:
+
+```json
+{
+  "response_id": "gen-445",
+  "output": [
+    {"type": "text", "content": "Hey! Great to hear from you."}
+  ],
+  "model": "claude-sonnet",
+  "usage": {
+    "input_tokens": 156,
+    "output_tokens": 22
+  }
+}
+```
+
+---
+
+### 4.3 Inactive Legacy Endpoints (No Active Callers)
+
+> **Status**: ⚠️ Code implemented but **no service in the codebase currently calls these endpoints**. Candidates for removal in a future cleanup pass once confirmed that no planned callers exist.
+
 #### POST /api/v1/generation/summaries
 
-Accepts a message window reference and generates a compact summary. If `template_id` is omitted, uses `tpl_memory_compaction`.
+Accepts a message window reference and generates a compact summary. If `template_id` is omitted, uses `tpl_memory_compaction`. This endpoint depends on the Conversation Persistence Store (assumed interface, see [ASSUMED_INTERFACES.md](./ASSUMED_INTERFACES.md)).
 
 #### POST /api/v1/generation/proactive-messages
 
 Accepts relationship context and generates a personalized check-in message. If `template_id` is omitted, uses `tpl_proactive_outreach`.
 
-> See the v1.0 API documentation or the Swagger UI for detailed legacy endpoint schemas.
+> See the Swagger UI at `/docs` for detailed request/response schemas for these endpoints.
 
 ---
 
@@ -322,6 +371,8 @@ Basic liveness check.
 
 Readiness check verifying the service can accept requests.
 
+> **Note**: 🔶 **Stub** — The readiness check currently does not verify provider connectivity. It always returns `ready`. See `routes/health_routes.py`.
+
 **Response** `200 OK`:
 
 ```json
@@ -334,6 +385,8 @@ Readiness check verifying the service can accept requests.
 ---
 
 ## 6. Published Events
+
+> **Implementation Status**: 🔶 **Stub** — The event schemas below are fully defined and events are serialized correctly in code. However, `EventPublisher._publish()` currently only logs events; no actual message broker is connected. Integration with a real broker (Redis Streams, RabbitMQ, etc.) is pending infrastructure decisions. See `events/publisher.py`.
 
 The AI Generation Service publishes the following events to the Internal Asynchronous Messaging Layer.
 
