@@ -42,7 +42,7 @@ services:
     environment:
       # API Keys
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      # VolcEngine DeepSeek配置 (优先使用)
+      # VolcEngine DeepSeek
       - VOLCENGINE_DEEPSEEK_API_KEY=${VOLCENGINE_DEEPSEEK_API_KEY}
       - VOLCENGINE_DEEPSEEK_ENDPOINT_ID=${VOLCENGINE_DEEPSEEK_ENDPOINT_ID}
       - VOLCENGINE_DEEPSEEK_BASE_URL=${VOLCENGINE_DEEPSEEK_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
@@ -50,7 +50,7 @@ services:
       - DOUBAO_API_KEY=${DOUBAO_API_KEY}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
 
-      # PostgreSQL配置
+      # PostgreSQL
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=postgres
@@ -58,14 +58,11 @@ services:
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_COLLECTION=memories
 
-      # MongoDB配置
+      # MongoDB
       - MONGODB_URI=mongodb://mongo:mongo@mongodb:27017/
       - MONGODB_DATABASE=mem0
 
-      # PalServer配置 (冷启动)
-      - PALSERVER_BASE_URL=${PALSERVER_BASE_URL}
-
-      # 其他配置
+      # other
       - HISTORY_DB_PATH=/app/history/history.db
       - EMBEDDING_MODEL_DIMS=1536
       - LOG_LEVEL=${LOG_LEVEL:-INFO}

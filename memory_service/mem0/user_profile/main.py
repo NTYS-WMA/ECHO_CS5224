@@ -12,7 +12,7 @@ from datetime import datetime
 from mem0.configs.base import MemoryConfig
 from mem0.user_profile.database import PostgresManager, MongoDBManager
 from mem0.user_profile.profile_manager import ProfileManager
-from mem0.user_profile.palserver_client import fetch_child_summary
+from mem0.user_profile.mainservice_client import fetch_user_summary
 from mem0.utils.factory import LlmFactory
 
 logger = logging.getLogger(__name__)
@@ -39,8 +39,8 @@ class UserProfile:
         result = user_profile.set_profile(
             user_id="user123",
             messages=[
-                {"role": "user", "content": "我叫张三，住在北京"},
-                {"role": "assistant", "content": "你好张三！"}
+                {"role": "user", "content": "I'm Alice, living in Singapore"},
+                {"role": "assistant", "content": "Nice to meet you, Alice!"}
             ]
         )
 
@@ -48,23 +48,23 @@ class UserProfile:
         profile = user_profile.get_profile(user_id="user123")
     """
 
-    def __init__(self, config: MemoryConfig, palserver_base_url: Optional[str] = None):
+    def __init__(self, config: MemoryConfig, mainservice_base_url: Optional[str] = None):
         """
         Initialize UserProfile
 
         Args:
             config: MemoryConfig instance with user_profile settings
-            palserver_base_url: PalServer base URL for cold start (optional)
-                Example: "http://localhost:8099/pal"
+            mainservice_base_url: MainService base URL for cold start (optional)
+                Example: "http://mainservice:8080"
+                Leave None to disable cold start.
 
         Architecture Note:
             - basic_info (PostgreSQL): Conversation-extracted reference data, NON-authoritative
-              * Exception: Cold start data from PalServer is imported here (see discuss/40-cold_start_implementation.md)
+              * Exception: Cold start data from MainService is imported here
             - additional_profile (MongoDB): Core value - interests, skills, personality
-            - See discuss/19-manual_data_decision.md for architectural decisions
         """
         self.config = config
-        self.palserver_base_url = palserver_base_url
+        self.mainservice_base_url = mainservice_base_url
 
         # Initialize database managers
         self.postgres = PostgresManager(config.user_profile.postgres)
@@ -105,12 +105,12 @@ class UserProfile:
             messages: List of message dicts with 'role' and 'content'
                 Example:
                 [
-                    {"role": "user", "content": "我叫李明，今年30岁"},
-                    {"role": "assistant", "content": "你好李明！"},
-                    {"role": "user", "content": "我喜欢踢足球"}
+                    {"role": "user", "content": "I'm Alice, 28, working as a data scientist"},
+                    {"role": "assistant", "content": "Nice to meet you, Alice!"},
+                    {"role": "user", "content": "I love hiking on weekends"}
                 ]
             manual_data: Optional dict of manually provided basic_info that takes priority
-                Example: {"name": "李明", "birthday": "1990-01-01"}
+                Example: {"name": "Alice", "birthday": "1995-06-15"}
 
         Returns:
             Result dict with status and details:
@@ -172,8 +172,8 @@ class UserProfile:
             {
                 "user_id": "user123",
                 "basic_info": {
-                    "name": "张三",
-                    "current_city": "北京",
+                    "name": "Alice",
+                    "current_city": "Singapore",
                     ...
                 },
                 "additional_profile": {
@@ -203,10 +203,10 @@ class UserProfile:
             # Query additional_profile with options
             additional_profile = self.mongodb.get(user_id, options) or {}
 
-            # Cold start: If user doesn't exist and PalServer is configured, try importing
-            if not basic_info and not additional_profile and self.palserver_base_url:
-                logger.info(f"User {user_id} not found, attempting cold start from PalServer")
-                if self._cold_start_from_palserver(user_id):
+            # Cold start: If user doesn't exist and MainService is configured, try importing
+            if not basic_info and not additional_profile and self.mainservice_base_url:
+                logger.info(f"User {user_id} not found, attempting cold start from MainService")
+                if self._cold_start_from_mainservice(user_id):
                     # Re-query after cold start
                     basic_info = self.postgres.get(user_id) or {}
                     additional_profile = self.mongodb.get(user_id, options) or {}
@@ -336,67 +336,60 @@ class UserProfile:
             logger.error(f"Failed to initialize databases: {e}")
             raise
 
-    def _cold_start_from_palserver(self, user_id: str) -> bool:
+    def _cold_start_from_mainservice(self, user_id: str) -> bool:
         """
-        Attempt to import initial profile data from PalServer (cold start)
+        Attempt to import initial profile data from MainService (cold start).
 
-        This method is called when a user's profile doesn't exist in MyMem0.
-        It fetches initial data from PalServer and stores it in both databases.
+        Called when a user's profile doesn't exist yet. Fetches initial data from
+        MainService and stores it in both databases.
 
         Args:
-            user_id: User ID (child_id in PalServer)
+            user_id: User ID
 
         Returns:
-            True if data was successfully imported, False otherwise
+            True if data was successfully imported, False otherwise.
 
         Note:
             This is a special case where basic_info receives data from an external
-            source rather than conversation extraction. See discuss/40-cold_start_implementation.md
-            for architectural justification.
+            source rather than conversation extraction.
         """
         try:
-            # Fetch data from PalServer
-            child_info = fetch_child_summary(user_id, self.palserver_base_url)
+            user_info = fetch_user_summary(user_id, self.mainservice_base_url)
 
-            if not child_info:
-                logger.info(f"No data found in PalServer for user {user_id}")
+            if not user_info:
+                logger.info(f"No data found in MainService for user {user_id}")
                 return False
 
-            # Convert PalServer data to MyMem0 format
-            basic_info, additional_profile = self._convert_palserver_data(child_info)
+            basic_info, additional_profile = self._convert_mainservice_data(user_info)
 
-            # Store basic_info in PostgreSQL (if any)
             if basic_info:
                 self.postgres.upsert(user_id, basic_info)
-                logger.info(f"Imported basic_info from PalServer for user {user_id}: {list(basic_info.keys())}")
+                logger.info(f"Imported basic_info from MainService for user {user_id}: {list(basic_info.keys())}")
 
-            # Store additional_profile in MongoDB (if any)
             if additional_profile:
-                # Import personality items
                 if "personality" in additional_profile:
                     for item in additional_profile["personality"]:
                         self.mongodb.add_item(user_id, "personality", item)
-                    logger.info(f"Imported {len(additional_profile['personality'])} personality traits from PalServer")
+                    logger.info(f"Imported {len(additional_profile['personality'])} personality traits from MainService")
 
-                # Import interest items
                 if "interests" in additional_profile:
                     for item in additional_profile["interests"]:
                         self.mongodb.add_item(user_id, "interests", item)
-                    logger.info(f"Imported {len(additional_profile['interests'])} interests from PalServer")
+                    logger.info(f"Imported {len(additional_profile['interests'])} interests from MainService")
 
             logger.info(f"Cold start completed successfully for user {user_id}")
             return True
 
         except Exception as e:
-            logger.warning(f"Cold start from PalServer failed for user {user_id}: {e}")
+            logger.warning(f"Cold start from MainService failed for user {user_id}: {e}")
             return False
 
-    def _convert_palserver_data(self, child_info: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    def _convert_mainservice_data(self, user_info: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
         """
-        Convert PalServer child data to MyMem0 profile format
+        Convert MainService user data to profile format.
 
         Args:
-            child_info: Child data from PalServer API
+            user_info: User data from MainService API
 
         Returns:
             Tuple of (basic_info, additional_profile) dicts
@@ -404,48 +397,39 @@ class UserProfile:
         Example:
             Input:
                 {
-                    "childName": "小明",
-                    "gender": 1,
-                    "personalityTraits": "开朗,善良,勇敢",
-                    "hobbies": "篮球,音乐,阅读"
+                    "name": "Alice",
+                    "gender": "female",
+                    "occupation": "software engineer",
+                    "company": "Google",
+                    "personality_traits": "curious,diligent",
+                    "interests": "hiking,photography"
                 }
 
             Output:
                 (
-                    {"nickname": "小明", "gender": "male"},
+                    {"name": "Alice", "gender": "female", "occupation": "software engineer", "company": "Google"},
                     {
-                        "personality": [
-                            {"name": "开朗", "degree": 3, "evidence": [...]},
-                            ...
-                        ],
-                        "interests": [
-                            {"name": "篮球", "degree": 3, "evidence": [...]},
-                            ...
-                        ]
+                        "personality": [{"name": "curious", "degree": 3, "evidence": [...]}, ...],
+                        "interests": [{"name": "hiking", "degree": 3, "evidence": [...]}, ...]
                     }
                 )
+
+        TODO: Update field mapping once MainService finalizes its response schema.
         """
         basic_info = {}
         additional_profile = {}
 
-        # Convert childName to nickname
-        if child_info.get("childName"):
-            basic_info["nickname"] = child_info["childName"]
+        # Map basic fields
+        for field in ("name", "nickname", "gender", "occupation", "company",
+                      "education_level", "university", "major", "current_city"):
+            if user_info.get(field):
+                basic_info[field] = user_info[field]
 
-        # Convert gender (1->male, 2->female, other->unknown)
-        gender_value = child_info.get("gender")
-        if gender_value == 1:
-            basic_info["gender"] = "male"
-        elif gender_value == 2:
-            basic_info["gender"] = "female"
-        elif gender_value is not None:
-            basic_info["gender"] = "unknown"
-
-        # Evidence timestamp (same for all items)
+        # Evidence timestamp (same for all items in a cold-start batch)
         timestamp = datetime.now().isoformat()
 
-        # Convert personalityTraits to personality items
-        personality_traits = child_info.get("personalityTraits")
+        # Convert personality_traits (comma-separated string) to personality items
+        personality_traits = user_info.get("personality_traits")
         if personality_traits and isinstance(personality_traits, str):
             traits = [t.strip() for t in personality_traits.split(",") if t.strip()]
             if traits:
@@ -453,33 +437,23 @@ class UserProfile:
                     {
                         "name": trait,
                         "degree": 3,  # Default medium degree
-                        "evidence": [
-                            {
-                                "text": "Initial profile from user registration",
-                                "timestamp": timestamp
-                            }
-                        ]
+                        "evidence": [{"text": "Initial profile from user registration", "timestamp": timestamp}]
                     }
                     for trait in traits
                 ]
 
-        # Convert hobbies to interests items
-        hobbies = child_info.get("hobbies")
-        if hobbies and isinstance(hobbies, str):
-            hobby_list = [h.strip() for h in hobbies.split(",") if h.strip()]
-            if hobby_list:
+        # Convert interests (comma-separated string) to interest items
+        interests = user_info.get("interests")
+        if interests and isinstance(interests, str):
+            interest_list = [i.strip() for i in interests.split(",") if i.strip()]
+            if interest_list:
                 additional_profile["interests"] = [
                     {
-                        "name": hobby,
+                        "name": interest,
                         "degree": 3,  # Default medium degree
-                        "evidence": [
-                            {
-                                "text": "Initial profile from user registration",
-                                "timestamp": timestamp
-                            }
-                        ]
+                        "evidence": [{"text": "Initial profile from user registration", "timestamp": timestamp}]
                     }
-                    for hobby in hobby_list
+                    for interest in interest_list
                 ]
 
         return basic_info, additional_profile

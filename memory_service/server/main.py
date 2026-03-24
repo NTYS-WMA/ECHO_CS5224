@@ -52,8 +52,7 @@ DOUBAO_API_KEY = os.environ.get("DOUBAO_API_KEY")
 DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY")
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", "/app/history/history.db")
 
-# VolcEngine DeepSeek API Configuration (优先使用，可选)
-# 如果配置了火山引擎，将优先使用火山引擎的DeepSeek；否则使用官方DeepSeek
+# VolcEngine DeepSeek API Configuration (optional; takes priority over official DeepSeek if set)
 VOLCENGINE_DEEPSEEK_API_KEY = os.environ.get("VOLCENGINE_DEEPSEEK_API_KEY")
 VOLCENGINE_DEEPSEEK_ENDPOINT_ID = os.environ.get("VOLCENGINE_DEEPSEEK_ENDPOINT_ID")
 VOLCENGINE_DEEPSEEK_BASE_URL = os.environ.get(
@@ -61,8 +60,8 @@ VOLCENGINE_DEEPSEEK_BASE_URL = os.environ.get(
     "https://ark.cn-beijing.volces.com/api/v3"
 )
 
-# PalServer configuration (for cold start)
-PALSERVER_BASE_URL = os.environ.get("PALSERVER_BASE_URL")
+# MainService configuration (for cold start)
+MAINSERVICE_BASE_URL = os.environ.get("MAINSERVICE_BASE_URL")
 
 # Neo4j configuration
 # NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://neo4j:7687")
@@ -96,7 +95,7 @@ DEFAULT_CONFIG = {
     "llm": {
         "provider": "deepseek",
         "config": {
-            # 优先使用火山引擎DeepSeek，否则使用官方DeepSeek
+            # Use VolcEngine DeepSeek if configured, otherwise fall back to official DeepSeek
             "api_key": VOLCENGINE_DEEPSEEK_API_KEY or DEEPSEEK_API_KEY,
             "model": VOLCENGINE_DEEPSEEK_ENDPOINT_ID or "deepseek-chat",
             "deepseek_base_url": VOLCENGINE_DEEPSEEK_BASE_URL if VOLCENGINE_DEEPSEEK_API_KEY else None,
@@ -120,7 +119,7 @@ DEFAULT_CONFIG = {
 MEMORY_INSTANCE = Memory.from_config(DEFAULT_CONFIG)
 USER_PROFILE_INSTANCE = UserProfile(
     MEMORY_INSTANCE.config,
-    palserver_base_url=PALSERVER_BASE_URL
+    mainservice_base_url=MAINSERVICE_BASE_URL
 )
 
 # Initialize UserProfile databases (auto-create tables if not exist)

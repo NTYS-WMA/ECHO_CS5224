@@ -7,6 +7,7 @@ history
 perf_log
 discuss
 archived
+.idea
 
 # Python
 __pycache__/
