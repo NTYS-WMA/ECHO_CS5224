@@ -1,8 +1,9 @@
 """
-Cron Service v2.0
+Cron Service v3.0
 
-Scheduled task management and polling engine for proactive outbound
-messaging in the ECHO platform.
+Lightweight global time-trigger service for the ECHO platform.
+Maintains a schedule table and publishes events to the event broker
+when scheduled times arrive.
 """
 
-__version__ = "2.0.0"
+__version__ = "3.0.0"
