@@ -245,25 +245,32 @@ confirmed by the platform team.
 
 | Topic | Description |
 |-------|-------------|
-| `proactive.task.dispatched` | Task successfully dispatched |
-| `proactive.task.failed` | Task failed after all retries |
-| `conversation.outbound` | Outbound message payload |
+| `cron.task.dispatched` | Task successfully dispatched to Message Dispatch Hub |
+| `cron.task.failed` | Task failed after all retries |
+
+> The Cron Service does **not** publish `conversation.outbound` events.
+> That topic is owned by the Channel Gateway Orchestrator.
 
 ### 3.2 Expected Publish Interface
 
+The Cron Service POSTs events to `{broker_url}/api/v1/events`:
+
 ```python
-# Pseudocode — actual client TBD
-await broker.publish(
-    topic="proactive.task.dispatched",
-    payload={
-        "event_type": "proactive.task.dispatched",
-        "event_id": "evt_xxx",
-        "task_id": "task_xxx",
-        "user_id": "usr_xxx",
-        "channel": "telegram",
-        "owner_service": "relationship-service",
-        "dispatched_at": "2026-03-22T18:30:00Z",
-        "schema_version": "2.0"
+# HTTP POST to broker
+await httpx_client.post(
+    f"{broker_url}/api/v1/events",
+    json={
+        "topic": "cron.task.dispatched",
+        "payload": {
+            "event_type": "cron.task.dispatched",
+            "event_id": "evt_xxx",
+            "task_id": "task_xxx",
+            "user_id": "usr_xxx",
+            "channel": "telegram",
+            "owner_service": "relationship-service",
+            "dispatched_at": "2026-03-22T18:30:00Z",
+            "schema_version": "2.0"
+        }
     }
 )
 ```
