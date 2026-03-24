@@ -41,32 +41,43 @@ CREATE TABLE IF NOT EXISTS user_profile.user_profile (
 );
 
 -- Relationship service owned tables
+CREATE TABLE IF NOT EXISTS users (
+    id VARCHAR(16) PRIMARY KEY,
+    telegram_id BIGINT,
+    first_name VARCHAR(128),
+    onboarding_complete BOOLEAN NOT NULL DEFAULT FALSE,
+    last_active_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(16) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role VARCHAR(16),
+    content TEXT,
+    is_proactive BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS relationship_scores (
-    user_id VARCHAR(50) PRIMARY KEY,
+    user_id VARCHAR(16) PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     score NUMERIC(5,4) NOT NULL DEFAULT 0.1000 CHECK (score >= 0.0 AND score <= 1.0),
-    tier VARCHAR(32) NOT NULL DEFAULT 'acquaintance',
     total_interactions INTEGER NOT NULL DEFAULT 0,
     positive_interactions INTEGER NOT NULL DEFAULT 0,
     negative_interactions INTEGER NOT NULL DEFAULT 0,
-    last_interaction_at TIMESTAMPTZ,
+    last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_scored_at TIMESTAMPTZ,
     last_decay_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS score_history (
-    id BIGSERIAL PRIMARY KEY,
-    user_id VARCHAR(50) NOT NULL,
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(16) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     delta NUMERIC(6,4) NOT NULL,
-    old_score NUMERIC(5,4),
     new_score NUMERIC(5,4) NOT NULL CHECK (new_score >= 0.0 AND new_score <= 1.0),
-    sentiment VARCHAR(32),
-    intensity NUMERIC(5,4),
-    reason TEXT,
+    sentiment VARCHAR(16),
+    intensity VARCHAR(16),
+    reason VARCHAR(32) NOT NULL,
     reasoning TEXT,
-    source VARCHAR(32) NOT NULL DEFAULT 'unknown',
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     scored_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
