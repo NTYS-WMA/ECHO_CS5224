@@ -124,50 +124,152 @@ For detailed request/response schemas, see [API_INTERFACES.md](./API_INTERFACES.
 
 ## Preset Templates
 
-| Template ID | Name | Category | Variables |
-|-------------|------|----------|-----------|
-| `tpl_chat_completion` | Chat Completion | chat | `user_prompt` |
-| `tpl_memory_compaction` | Memory Compaction Summary | summarization | `summary_type`, `conversation_text` |
-| `tpl_proactive_outreach` | Proactive Outreach Message | proactive | `context_block` |
-| `tpl_sentiment_analysis` | Sentiment Analysis | analysis | `text`, `output_format` (opt) |
-| `tpl_topic_extraction` | Topic Extraction | analysis | `conversation_text` |
-| `tpl_safety_filter` | Safety Content Filter | safety | `content` |
+| Template ID | Name | Category | Variables | Note |
+|-------------|------|----------|-----------|------|
+| `tpl_chat_completion` | Chat Completion | chat | `user_prompt` | Also supports `messages` mode |
+| `tpl_memory_compaction` | Memory Compaction Summary | summarization | `user_prompt` | Caller assembles full summarization prompt |
+| `tpl_proactive_outreach` | Proactive Outreach Message | proactive | `user_prompt` | Caller assembles full outreach prompt |
+| `tpl_sentiment_analysis` | Sentiment Analysis | analysis | `text`, `output_format` (opt) | |
+| `tpl_topic_extraction` | Topic Extraction | analysis | `conversation_text` | |
+| `tpl_safety_filter` | Safety Content Filter | safety | `content` | |
 
 Business callers can register additional templates via `POST /api/v1/templates`.
 
 ---
 
-## Usage Example
+## Calling Convention for Business Services
 
-### 1. Register a Custom Template
+All business services should call the unified `POST /api/v1/generation/execute` endpoint. Each use case maps to a preset `template_id`. The caller assembles the full prompt and passes it as the `user_prompt` variable. The AI service provides the system-level prompt (identity, safety, role instructions) via the template.
+
+### Use Case A: Chat Completion (Conversation Orchestrator)
+
+**template_id**: `tpl_chat_completion`
+
+The Conversation Orchestrator can use either **messages mode** (pass full conversation history) or **variable mode** (pass a single assembled prompt). Messages mode is recommended for multi-turn chat.
 
 ```python
 import httpx
 
+# Option 1: Messages mode (recommended for multi-turn chat)
+response = httpx.post("http://localhost:8003/api/v1/generation/execute", json={
+    "user_id": "usr_9f2a7c41",
+    "conversation_id": "telegram-chat-123456789",
+    "template_id": "tpl_chat_completion",
+    "messages": [
+        {"role": "system", "content": "You are ECHO. The user likes hiking."},
+        {"role": "user", "content": "Hey ECHO!"},
+        {"role": "assistant", "content": "Hey! How's it going?"},
+        {"role": "user", "content": "Any trail suggestions?"}
+    ],
+    "generation_config": {"temperature": 0.7, "max_tokens": 300},
+    "correlation_id": "evt-001"
+})
+
+# Option 2: Variable mode (single prompt)
+response = httpx.post("http://localhost:8003/api/v1/generation/execute", json={
+    "user_id": "usr_9f2a7c41",
+    "template_id": "tpl_chat_completion",
+    "variables": {"user_prompt": "The user said: 'Any trail suggestions?' — suggest a moderate 2-hour trail."},
+    "correlation_id": "evt-001"
+})
+
+reply = response.json()["output"][0]["content"]
+```
+
+### Use Case B: Memory Compaction Summary (Memory Service)
+
+**template_id**: `tpl_memory_compaction`
+
+The Memory Service assembles the full summarization prompt (including summary type, conversation text, and instructions) and passes it as `user_prompt`.
+
+```python
+# The caller assembles the full prompt
+conversation_text = "\n".join([
+    "[user]: I went for a run this evening.",
+    "[assistant]: That's great! How did it go?",
+    "[user]: It was good, I ran 5km in the park.",
+])
+user_prompt = (
+    f"Please summarize the following conversation into a compact memory entry.\n"
+    f"Summary type: memory_compaction\n\n"
+    f"Conversation:\n{conversation_text}\n\n"
+    f"Provide a concise summary capturing the user's key preferences, "
+    f"emotional state, and important facts."
+)
+
+response = httpx.post("http://localhost:8003/api/v1/generation/execute", json={
+    "user_id": "usr_9f2a7c41",
+    "template_id": "tpl_memory_compaction",
+    "variables": {"user_prompt": user_prompt},
+    "correlation_id": "evt-022"
+})
+
+summary = response.json()["output"][0]["content"]
+```
+
+### Use Case C: Proactive Outreach Message (Proactive Engagement Service)
+
+**template_id**: `tpl_proactive_outreach`
+
+The Proactive Engagement Service assembles the full context prompt (relationship tier, affinity, inactivity, tone, user preferences) and passes it as `user_prompt`.
+
+```python
+# The caller assembles the full prompt
+user_prompt = (
+    "Based on the following context, compose a short, natural check-in "
+    "message to re-engage this user. The message should feel genuine "
+    "and not automated.\n\n"
+    "Relationship tier: close_friend\n"
+    "Affinity score: 0.74\n"
+    "Days since last interaction: 3\n"
+    "Desired tone: warm\n"
+    "User timezone: Asia/Singapore\n"
+    "Recent context about the user: User enjoys evening workouts\n\n"
+    "Generate only the message text, nothing else."
+)
+
+response = httpx.post("http://localhost:8003/api/v1/generation/execute", json={
+    "user_id": "usr_9f2a7c41",
+    "template_id": "tpl_proactive_outreach",
+    "variables": {"user_prompt": user_prompt},
+    "generation_config": {"max_tokens": 120},
+    "correlation_id": "evt-6001"
+})
+
+message = response.json()["output"][0]["content"]
+```
+
+### Response Format (all use cases)
+
+```json
+{
+  "response_id": "gen-a1b2c3d4e5f6",
+  "template_id": "tpl_proactive_outreach",
+  "output": [
+    {"type": "text", "content": "Hey! It's been a few days — hope your workouts are going well."}
+  ],
+  "model": "claude-sonnet",
+  "usage": {"input_tokens": 156, "output_tokens": 32}
+}
+```
+
+### Register a Custom Template
+
+Business services can also register custom templates:
+
+```python
 response = httpx.post("http://localhost:8003/api/v1/templates", json={
     "name": "Custom Greeting",
     "owner": "conversation-orchestrator",
     "category": "chat",
     "system_prompt": "You are ECHO, a friendly companion.",
-    "user_prompt_template": "Greet the user: {{context}}",
+    "user_prompt_template": "{{user_prompt}}",
     "variables": {
-        "context": {"type": "string", "required": True, "description": "User context"}
+        "user_prompt": {"type": "string", "required": True, "description": "Full prompt"}
     },
     "defaults": {"temperature": 0.8, "max_tokens": 100}
 })
 template_id = response.json()["template_id"]
-# e.g., "tpl_custom_greeting_a1b2c3"
-```
-
-### 2. Execute Generation with Template
-
-```python
-response = httpx.post("http://localhost:8003/api/v1/generation/execute", json={
-    "user_id": "usr_9f2a7c41",
-    "template_id": template_id,
-    "variables": {"context": "User likes hiking and morning coffee."}
-})
-print(response.json()["output"][0]["content"])
 ```
 
 ---

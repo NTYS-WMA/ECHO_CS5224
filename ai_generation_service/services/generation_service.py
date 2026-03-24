@@ -288,15 +288,21 @@ class GenerationService:
             for msg in conversation_messages
         )
 
+        # Assemble the full user prompt (business-layer responsibility)
+        user_prompt = (
+            f"Please summarize the following conversation into a compact memory entry.\n"
+            f"Summary type: {request.summary_type}\n\n"
+            f"Conversation:\n{conversation_text}\n\n"
+            f"Provide a concise summary capturing the user's key preferences, "
+            f"emotional state, and important facts."
+        )
+
         template_id = request.template_id or DEFAULT_SUMMARY_TEMPLATE
 
         try:
             messages, defaults = self._renderer.render(
                 template_id=template_id,
-                variables={
-                    "summary_type": request.summary_type,
-                    "conversation_text": conversation_text,
-                },
+                variables={"user_prompt": user_prompt},
             )
         except TemplateRenderError as e:
             raise GenerationError(
@@ -372,12 +378,20 @@ class GenerationService:
             )
         context_block = "\n".join(context_parts)
 
+        # Assemble the full user prompt (business-layer responsibility)
+        user_prompt = (
+            f"Based on the following context, compose a short, natural check-in "
+            f"message to re-engage this user. The message should feel genuine "
+            f"and not automated.\n\n{context_block}\n\n"
+            f"Generate only the message text, nothing else."
+        )
+
         template_id = request.template_id or DEFAULT_PROACTIVE_TEMPLATE
 
         try:
             messages, defaults = self._renderer.render(
                 template_id=template_id,
-                variables={"context_block": context_block},
+                variables={"user_prompt": user_prompt},
             )
         except TemplateRenderError as e:
             raise GenerationError(
