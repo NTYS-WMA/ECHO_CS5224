@@ -535,7 +535,7 @@ The old endpoint would internally fetch conversation messages from the Conversat
 
 ---
 
-#### Use Case C: Proactive Outreach Message (Proactive Engagement Service)
+#### Use Case C: Proactive Outreach Message (Cron Service)
 
 **Before** — `POST /api/v1/generation/proactive-messages` (architecture draft):
 
