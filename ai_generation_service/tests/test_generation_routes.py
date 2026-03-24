@@ -456,6 +456,102 @@ class TestGenerationRouteValidation:
         assert response.status_code == 422
 
 
+class TestEmbeddingRouteValidation:
+    """Tests for embedding API route request validation."""
+
+    def setup_method(self):
+        from ..app import create_app
+        from ..services.generation_service import GenerationService
+
+        self.app = create_app()
+        mock_service = MagicMock(spec=GenerationService)
+
+        from ..routes.generation_routes import get_generation_service
+
+        self.app.dependency_overrides[get_generation_service] = lambda: mock_service
+        self.client = TestClient(self.app)
+
+    def teardown_method(self):
+        self.app.dependency_overrides.clear()
+
+    def test_embedding_missing_user_id(self):
+        """POST /embeddings should require user_id."""
+        payload = {"input": "some text"}
+        response = self.client.post("/api/v1/generation/embeddings", json=payload)
+        assert response.status_code == 422
+
+    def test_embedding_missing_input(self):
+        """POST /embeddings should require input."""
+        payload = {"user_id": "usr_1"}
+        response = self.client.post("/api/v1/generation/embeddings", json=payload)
+        assert response.status_code == 422
+
+    def test_embedding_empty_input(self):
+        """POST /embeddings should reject empty input string."""
+        payload = {"user_id": "usr_1", "input": ""}
+        response = self.client.post("/api/v1/generation/embeddings", json=payload)
+        assert response.status_code == 422
+
+    def test_embedding_valid_request(self):
+        """POST /embeddings should accept a valid request."""
+        from unittest.mock import AsyncMock
+        from ..models.responses import EmbeddingResponse, UsageInfo
+
+        mock_response = EmbeddingResponse(
+            response_id="gen-test",
+            embedding=[0.1, 0.2, 0.3],
+            dimension=3,
+            model="amazon.titan-embed-text-v2:0",
+            usage=UsageInfo(input_tokens=5, output_tokens=0),
+        )
+
+        from ..routes.generation_routes import get_generation_service
+
+        mock_service = self.app.dependency_overrides[get_generation_service]()
+        mock_service.embed = AsyncMock(return_value=mock_response)
+
+        self.app.dependency_overrides[get_generation_service] = lambda: mock_service
+
+        payload = {
+            "user_id": "usr_1",
+            "input": "Hello world",
+            "correlation_id": "evt-emb-001",
+        }
+        response = self.client.post("/api/v1/generation/embeddings", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert "embedding" in data
+        assert data["dimension"] == 3
+        assert data["model"] == "amazon.titan-embed-text-v2:0"
+
+
+class TestEmbeddingRequestModel:
+    """Tests for EmbeddingRequest Pydantic model validation."""
+
+    def test_embedding_request_valid(self):
+        """Should accept a valid EmbeddingRequest."""
+        from ..models.requests import EmbeddingRequest
+
+        req = EmbeddingRequest(
+            user_id="usr_1",
+            input="Hello world",
+        )
+        assert req.user_id == "usr_1"
+        assert req.input == "Hello world"
+        assert req.correlation_id is None
+
+    def test_embedding_request_with_correlation_id(self):
+        """Should accept EmbeddingRequest with correlation_id."""
+        from ..models.requests import EmbeddingRequest
+
+        req = EmbeddingRequest(
+            user_id="usr_1",
+            input="Hello",
+            correlation_id="evt-emb-001",
+        )
+        assert req.correlation_id == "evt-emb-001"
+
+
 class TestRequestModels:
     """Tests for Pydantic request model validation."""
 

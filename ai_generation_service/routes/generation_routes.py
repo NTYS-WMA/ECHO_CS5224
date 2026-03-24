@@ -5,9 +5,10 @@ Exposes the primary template-based generation endpoint and legacy endpoints
 for backward compatibility:
 
 1. POST /api/v1/generation/execute            — Primary: template-based generation
-2. POST /api/v1/generation/chat-completions   — Legacy: chat completion
-3. POST /api/v1/generation/summaries          — Legacy: summary generation
-4. POST /api/v1/generation/proactive-messages — Legacy: proactive message generation
+2. POST /api/v1/generation/embeddings         — Primary: text embedding
+3. POST /api/v1/generation/chat-completions   — Legacy: chat completion
+4. POST /api/v1/generation/summaries          — Legacy: summary generation
+5. POST /api/v1/generation/proactive-messages — Legacy: proactive message generation
 """
 
 import logging
@@ -16,12 +17,14 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..models.requests import (
     ChatCompletionRequest,
+    EmbeddingRequest,
     ProactiveMessageRequest,
     SummaryGenerationRequest,
     TemplateGenerationRequest,
 )
 from ..models.responses import (
     ChatCompletionResponse,
+    EmbeddingResponse,
     ErrorResponse,
     GenerationResponse,
     ProactiveMessageResponse,
@@ -118,7 +121,46 @@ async def execute_generation(
 
 
 # ------------------------------------------------------------------ #
-# 2. Legacy: Chat Completion
+# 2. Embedding
+# ------------------------------------------------------------------ #
+
+
+@router.post(
+    "/embeddings",
+    response_model=EmbeddingResponse,
+    responses={
+        500: {"model": ErrorResponse, "description": "Embedding failed after all retries"},
+        503: {"model": ErrorResponse, "description": "Provider timeout (retryable)"},
+    },
+    summary="Generate a text embedding",
+    description=(
+        "Generate a vector embedding for the given input text. Uses the "
+        "configured embedding model (e.g., Amazon Titan Embeddings v2) to "
+        "produce a dense vector representation suitable for semantic search, "
+        "similarity matching, and retrieval-augmented generation (RAG)."
+    ),
+)
+async def generate_embedding(
+    request: EmbeddingRequest,
+    service: GenerationService = Depends(get_generation_service),
+) -> EmbeddingResponse:
+    """Generate a text embedding."""
+    try:
+        return await service.embed(request)
+    except GenerationError as e:
+        logger.error(
+            "Embedding failed for user %s: [%s] %s",
+            request.user_id,
+            e.error_code,
+            str(e),
+        )
+        _handle_generation_error(e, request.correlation_id)
+    except Exception as e:
+        _handle_unexpected_error(e, request.correlation_id)
+
+
+# ------------------------------------------------------------------ #
+# 3. Legacy: Chat Completion
 # ------------------------------------------------------------------ #
 
 
@@ -156,7 +198,7 @@ async def chat_completion(
 
 
 # ------------------------------------------------------------------ #
-# 3. Legacy: Summary Generation
+# 4. Legacy: Summary Generation
 # ------------------------------------------------------------------ #
 
 
@@ -194,7 +236,7 @@ async def generate_summary(
 
 
 # ------------------------------------------------------------------ #
-# 4. Legacy: Proactive Message Generation
+# 5. Legacy: Proactive Message Generation
 # ------------------------------------------------------------------ #
 
 

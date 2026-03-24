@@ -133,6 +133,40 @@ class TemplateGenerationRequest(BaseModel):
 
 
 # ------------------------------------------------------------------ #
+# Embedding Request
+# ------------------------------------------------------------------ #
+
+
+class EmbeddingRequest(BaseModel):
+    """
+    Request body for POST /api/v1/generation/embeddings.
+
+    Generates a vector embedding for the given input text. Used by
+    business services for semantic search, similarity matching, and
+    retrieval-augmented generation (RAG).
+
+    Source: Any business service (Memory Service, Search Service, etc.)
+    """
+
+    user_id: str = Field(
+        ...,
+        description="Internal user identifier.",
+        examples=["usr_9f2a7c41"],
+    )
+    input: str = Field(
+        ...,
+        min_length=1,
+        description="The text to generate an embedding for.",
+        examples=["User enjoys evening workouts and friendly check-ins."],
+    )
+    correlation_id: Optional[str] = Field(
+        None,
+        description="Correlation ID for distributed tracing.",
+        examples=["evt-emb-001"],
+    )
+
+
+# ------------------------------------------------------------------ #
 # Legacy Endpoint Models (kept for backward compatibility)
 # ------------------------------------------------------------------ #
 

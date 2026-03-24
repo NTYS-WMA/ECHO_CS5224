@@ -106,9 +106,9 @@ await queue.put({"topic": topic, "payload": json_payload})
 ## 3. Amazon Bedrock — Converse API
 
 **Owner**: AWS / External
-**Status**: ✅ **Implemented** — `services/bedrock_provider.py` fully implements the Converse API integration with lazy client initialization, async executor wrapping, timeout handling, and error mapping. Requires `boto3` and valid AWS credentials (IAM role or env vars) at deploy time.
+**Status**: ✅ **Implemented** — `services/bedrock_provider.py` fully implements the Converse API (text generation) and InvokeModel API (embeddings) with lazy client initialization, async executor wrapping, timeout handling, and error mapping. Requires `boto3` and valid AWS credentials (IAM role or env vars) at deploy time.
 
-The primary AI provider uses the Amazon Bedrock Converse API to invoke Claude models.
+The primary AI provider uses the Amazon Bedrock Converse API to invoke Claude models for text generation, and the InvokeModel API for embeddings via Amazon Titan.
 
 **Assumed SDK Call**:
 
@@ -151,10 +151,31 @@ response = bedrock_client.converse(
 | `AI_GEN_BEDROCK_MODEL_ID` | Bedrock model identifier |
 | `AI_GEN_BEDROCK_TIMEOUT_SECONDS` | Request timeout (default: 30s) |
 
+**Assumed Embedding SDK Call (InvokeModel)**:
+
+```python
+response = bedrock_client.invoke_model(
+    modelId="amazon.titan-embed-text-v2:0",
+    contentType="application/json",
+    accept="application/json",
+    body='{"inputText": "Hello"}'
+)
+```
+
+**Assumed Embedding Response Structure**:
+
+```json
+{
+  "embedding": [0.0123, -0.0456, ...],
+  "inputTextTokenCount": 5
+}
+```
+
 **Notes**:
 
 - AWS credentials are expected to be provided via IAM role (EC2 instance profile) or environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`).
 - The Bedrock provider wraps the synchronous boto3 call in `asyncio.run_in_executor` for non-blocking operation.
+- The embedding model is configured separately via `AI_GEN_BEDROCK_EMBEDDING_MODEL_ID` (default: `amazon.titan-embed-text-v2:0`).
 
 ---
 
