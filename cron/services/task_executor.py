@@ -192,7 +192,7 @@ class TaskExecutor:
                 owner_service=task.owner_service,
             )
             await self._events.publish(
-                "proactive.task.dispatched",
+                "cron.task.dispatched",
                 event.model_dump(mode="json"),
             )
         except Exception as e:
@@ -214,7 +214,7 @@ class TaskExecutor:
                 retry_count=retry_count,
             )
             await self._events.publish(
-                "proactive.task.failed",
+                "cron.task.failed",
                 event.model_dump(mode="json"),
             )
         except Exception as e:

@@ -103,6 +103,8 @@ async def lifespan(app: FastAPI):
     event_publisher = EventPublisher(
         broker_url=settings.EVENT_BROKER_URL,
         enabled=settings.EVENT_PUBLISH_ENABLED,
+        timeout_seconds=settings.EVENT_PUBLISH_TIMEOUT,
+        max_retries=settings.EVENT_PUBLISH_RETRIES,
     )
 
     # 5. Task Executor
