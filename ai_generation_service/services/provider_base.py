@@ -21,6 +21,15 @@ class ProviderResponse:
     output_tokens: int
 
 
+@dataclass
+class EmbeddingResponse:
+    """Standardized response from an embedding request."""
+
+    embedding: List[float]
+    model: str
+    input_tokens: int
+
+
 class AIProviderBase(ABC):
     """Abstract interface for AI model providers."""
 
@@ -43,6 +52,26 @@ class AIProviderBase(ABC):
 
         Returns:
             ProviderResponse with generated content and usage metadata.
+
+        Raises:
+            ProviderTimeoutError: If the provider does not respond in time.
+            ProviderError: For any other provider-level failure.
+        """
+        ...
+
+    @abstractmethod
+    async def embed(
+        self,
+        text: str,
+    ) -> EmbeddingResponse:
+        """
+        Generate an embedding vector for the given text.
+
+        Args:
+            text: The input text to embed.
+
+        Returns:
+            EmbeddingResponse with the embedding vector and usage metadata.
 
         Raises:
             ProviderTimeoutError: If the provider does not respond in time.
