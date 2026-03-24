@@ -84,7 +84,7 @@ class TemplateGenerationRequest(BaseModel):
     prompt from the template and executes it.
 
     Source: Any business service (Conversation Orchestrator, Memory Service,
-    Proactive Engagement Service, etc.)
+    Cron Service, etc.)
     """
 
     user_id: str = Field(
@@ -331,7 +331,7 @@ class ProactiveMessageRequest(BaseModel):
     """
     Request body for POST /api/v1/generation/proactive-messages.
 
-    Source: Proactive Engagement Service
+    Source: Cron Service
 
     NOTE: This is a legacy endpoint. New callers should use
     POST /api/v1/generation/execute with template_id instead.

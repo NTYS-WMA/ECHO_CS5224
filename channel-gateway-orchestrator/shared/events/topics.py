@@ -30,6 +30,6 @@ AI_GENERATION_COMPLETED = "ai.generation.completed"
 MEDIA_ASSET_READY = "media.asset.ready"
 MEDIA_GENERATION_FAILED = "media.generation.failed"
 
-#Proactive Engagement
-PROACTIVE_SCAN_REQUESTED = "proactive.scan.requested"
-PROACTIVE_DISPATCH_COMPLETED = "proactive.dispatch.completed"
+#Cron
+CRON_SCAN_REQUESTED = "cron.scan.requested"
+CRON_DISPATCH_COMPLETED = "cron.dispatch.completed"

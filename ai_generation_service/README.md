@@ -208,11 +208,11 @@ response = httpx.post("http://localhost:8003/api/v1/generation/execute", json={
 summary = response.json()["output"][0]["content"]
 ```
 
-### Use Case C: Proactive Outreach Message (Proactive Engagement Service)
+### Use Case C: Proactive Outreach Message (Cron Service)
 
 **template_id**: `tpl_proactive_outreach`
 
-The Proactive Engagement Service assembles the full context prompt (relationship tier, affinity, inactivity, tone, user preferences) and passes it as `user_prompt`.
+The Cron Service assembles the full context prompt (relationship tier, affinity, inactivity, tone, user preferences) and passes it as `user_prompt`.
 
 ```python
 # The caller assembles the full prompt
