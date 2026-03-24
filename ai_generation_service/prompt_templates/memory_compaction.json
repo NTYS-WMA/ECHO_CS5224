@@ -1,22 +1,17 @@
 {
   "template_id": "tpl_memory_compaction",
   "name": "Memory Compaction Summary",
-  "description": "System-level template for summarizing a conversation window into a compact memory entry. The business layer provides the formatted conversation text and summary type.",
-  "version": "1.0.0",
+  "description": "System-level template for summarizing conversation content into compact memory entries. The business caller assembles the full prompt (including summary type, conversation text, and any instructions) and passes it as a single user_prompt variable.",
+  "version": "2.0.0",
   "owner": "ai-generation-service",
   "category": "summarization",
   "system_prompt": "You are a precise summarization assistant for the ECHO companion platform. Your task is to distill conversation content into a compact, factual summary that captures the user's key preferences, emotional state, and important facts. The summary will be stored as long-term memory for future personalization. Be concise, objective, and focus on actionable insights about the user.",
-  "user_prompt_template": "Please summarize the following conversation into a compact memory entry.\nSummary type: {{summary_type}}\n\nConversation:\n{{conversation_text}}\n\nProvide a concise summary capturing the user's key preferences, emotional state, and important facts.",
+  "user_prompt_template": "{{user_prompt}}",
   "variables": {
-    "summary_type": {
+    "user_prompt": {
       "type": "string",
       "required": true,
-      "description": "The type of summary to generate (e.g., 'memory_compaction', 'session_recap')."
-    },
-    "conversation_text": {
-      "type": "string",
-      "required": true,
-      "description": "The formatted conversation text to summarize, assembled by the business layer."
+      "description": "The full summarization prompt assembled by the business layer, including summary type, conversation text, and output instructions."
     }
   },
   "defaults": {
@@ -25,5 +20,5 @@
   },
   "tags": ["summarization", "memory", "compaction"],
   "created_at": "2026-03-23T00:00:00Z",
-  "updated_at": "2026-03-23T00:00:00Z"
+  "updated_at": "2026-03-24T00:00:00Z"
 }
