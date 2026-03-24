@@ -6,8 +6,6 @@ Delegates to the team's AI Generation Service via HTTP.
 Endpoint: POST /api/v1/generation/execute  (host:8003)
 Template:  tpl_sentiment_analysis — variables: {"text": <prompt>}
 
-The rest of the service (relationship_manager.py) needs no changes —
-it only depends on the function signature: complete(prompt, max_tokens) -> str
 """
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
