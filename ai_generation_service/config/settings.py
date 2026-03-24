@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # Service identity
     SERVICE_NAME: str = "ai-generation-service"
-    SERVICE_VERSION: str = "2.0.0"
+    SERVICE_VERSION: str = "2.2.0"
     HOST: str = "0.0.0.0"
     PORT: int = 8003
 
@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     BEDROCK_MODEL_ID: str = "anthropic.claude-sonnet-4-20250514"
     BEDROCK_MAX_RETRIES: int = 2
     BEDROCK_TIMEOUT_SECONDS: int = 30
+    BEDROCK_EMBEDDING_MODEL_ID: str = "amazon.titan-embed-text-v2:0"
 
     # Fallback AI provider (optional, e.g., OpenAI-compatible endpoint)
     FALLBACK_PROVIDER: Optional[str] = None

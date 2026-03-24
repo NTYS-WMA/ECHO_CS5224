@@ -1,8 +1,8 @@
 # AI Generation Service — Assumed External Interfaces
 
-**Version**: 2.0  
-**Last Updated**: 2026-03-23  
-**Status**: TO BE UPDATED — These interfaces are assumed based on the architecture specification and have not been confirmed with the owning teams.
+**Version**: 2.1
+**Last Updated**: 2026-03-24
+**Status**: Per-section statuses below. Last reviewed: 2026-03-24.
 
 ---
 
@@ -14,8 +14,8 @@ This document lists all external service interfaces that the AI Generation Servi
 
 ## 1. Conversation Persistence Store — Message Window Retrieval
 
-**Owner**: Platform / Data Team  
-**Status**: TO BE UPDATED
+**Owner**: Platform / Data Team
+**Status**: ⚠️ **Assumed Interface** — HTTP client is fully implemented in `services/conversation_store_client.py`, but the target endpoint has not been confirmed by the owning team. Currently no code path triggers this in production (the `/summaries` legacy endpoint that uses it has no active callers).
 
 The AI Generation Service calls this endpoint when processing summary generation requests (legacy `POST /api/v1/generation/summaries` or via `execute` with `tpl_memory_compaction`). The summary request specifies a message window by ID range, and the service needs to retrieve the actual message content to build the summarization prompt.
 
@@ -67,8 +67,8 @@ GET /api/v1/conversations/{conversation_id}/messages?from_id={from_message_id}&t
 
 ## 2. Internal Asynchronous Messaging Layer — Event Publishing
 
-**Owner**: Platform / Infrastructure Team  
-**Status**: TO BE UPDATED
+**Owner**: Platform / Infrastructure Team
+**Status**: 🔶 **Stub** — Event schemas and publisher wrapper are implemented (`events/publisher.py`). The `_publish()` method logs events but does not send to a real broker. Broker technology decision is pending.
 
 The AI Generation Service publishes events to two topics for telemetry and failure monitoring. The concrete broker technology (Redis Streams, RabbitMQ, SQS, or local in-process queue) has not been finalized.
 
@@ -105,10 +105,10 @@ await queue.put({"topic": topic, "payload": json_payload})
 
 ## 3. Amazon Bedrock — Converse API
 
-**Owner**: AWS / External  
-**Status**: Assumed based on AWS documentation
+**Owner**: AWS / External
+**Status**: ✅ **Implemented** — `services/bedrock_provider.py` fully implements the Converse API (text generation) and InvokeModel API (embeddings) with lazy client initialization, async executor wrapping, timeout handling, and error mapping. Requires `boto3` and valid AWS credentials (IAM role or env vars) at deploy time.
 
-The primary AI provider uses the Amazon Bedrock Converse API to invoke Claude models.
+The primary AI provider uses the Amazon Bedrock Converse API to invoke Claude models for text generation, and the InvokeModel API for embeddings via Amazon Titan.
 
 **Assumed SDK Call**:
 
@@ -151,17 +151,38 @@ response = bedrock_client.converse(
 | `AI_GEN_BEDROCK_MODEL_ID` | Bedrock model identifier |
 | `AI_GEN_BEDROCK_TIMEOUT_SECONDS` | Request timeout (default: 30s) |
 
+**Assumed Embedding SDK Call (InvokeModel)**:
+
+```python
+response = bedrock_client.invoke_model(
+    modelId="amazon.titan-embed-text-v2:0",
+    contentType="application/json",
+    accept="application/json",
+    body='{"inputText": "Hello"}'
+)
+```
+
+**Assumed Embedding Response Structure**:
+
+```json
+{
+  "embedding": [0.0123, -0.0456, ...],
+  "inputTextTokenCount": 5
+}
+```
+
 **Notes**:
 
 - AWS credentials are expected to be provided via IAM role (EC2 instance profile) or environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`).
 - The Bedrock provider wraps the synchronous boto3 call in `asyncio.run_in_executor` for non-blocking operation.
+- The embedding model is configured separately via `AI_GEN_BEDROCK_EMBEDDING_MODEL_ID` (default: `amazon.titan-embed-text-v2:0`).
 
 ---
 
 ## 4. Template Persistence (Future Enhancement)
 
-**Owner**: AI Generation Service Team  
-**Status**: TO BE UPDATED
+**Owner**: AI Generation Service Team
+**Status**: ✅ **Implemented (Local Only)** — Templates persist to local JSON files and in-memory store via `services/template_manager.py`. Functional for single-instance deployment. Multi-instance / production deployment requires a shared durable backend (not yet implemented).
 
 Currently, prompt templates are stored in-memory and persisted as JSON files on the local filesystem. For production deployment, a durable storage backend is recommended.
 
@@ -194,3 +215,4 @@ Currently, prompt templates are stored in-memory and persisted as JSON files on 
 |------|--------|
 | 2026-03-23 | v1.0 — Initial assumed interfaces documented |
 | 2026-03-23 | v2.0 — Added template persistence future enhancement; updated for template-based architecture |
+| 2026-03-24 | v2.1 — Replaced blanket "TO BE UPDATED" with per-section implementation statuses; Bedrock marked as fully implemented; added caller activity notes |
