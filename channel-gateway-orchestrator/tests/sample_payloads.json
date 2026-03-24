@@ -1,0 +1,137 @@
+{
+  "command_start": {
+    "update_id": 100000001,
+    "message": {
+      "message_id": 1,
+      "date": 1773241800,
+      "text": "/start",
+      "from": {
+        "id": 987654321,
+        "is_bot": false,
+        "first_name": "Bob",
+        "username": "bob_test",
+        "language_code": "en"
+      },
+      "chat": {
+        "id": 987654321,
+        "first_name": "Bob",
+        "username": "bob_test",
+        "type": "private"
+      }
+    }
+  },
+
+  "command_help": {
+    "update_id": 100000002,
+    "message": {
+      "message_id": 2,
+      "date": 1773241801,
+      "text": "/help",
+      "from": {
+        "id": 987654321,
+        "is_bot": false,
+        "first_name": "Bob",
+        "username": "bob_test",
+        "language_code": "en"
+      },
+      "chat": {
+        "id": 987654321,
+        "first_name": "Bob",
+        "username": "bob_test",
+        "type": "private"
+      }
+    }
+  },
+
+  "normal_message": {
+    "update_id": 100000003,
+    "message": {
+      "message_id": 3,
+      "date": 1773241802,
+      "text": "Hey, how are you doing today?",
+      "from": {
+        "id": 111222333,
+        "is_bot": false,
+        "first_name": "Charlie",
+        "username": "charlie_dev",
+        "language_code": "en"
+      },
+      "chat": {
+        "id": 111222333,
+        "first_name": "Charlie",
+        "username": "charlie_dev",
+        "type": "private"
+      }
+    }
+  },
+
+  "multi_turn_message_1": {
+    "update_id": 100000004,
+    "message": {
+      "message_id": 10,
+      "date": 1773241900,
+      "text": "I just went for a run!",
+      "from": {
+        "id": 123456789,
+        "is_bot": false,
+        "first_name": "Alice",
+        "username": "alice123",
+        "language_code": "en"
+      },
+      "chat": {
+        "id": 123456789,
+        "first_name": "Alice",
+        "username": "alice123",
+        "type": "private"
+      }
+    }
+  },
+
+  "multi_turn_message_2": {
+    "update_id": 100000005,
+    "message": {
+      "message_id": 11,
+      "date": 1773241960,
+      "text": "It was great, did 5km in 28 minutes",
+      "from": {
+        "id": 123456789,
+        "is_bot": false,
+        "first_name": "Alice",
+        "username": "alice123",
+        "language_code": "en"
+      },
+      "chat": {
+        "id": 123456789,
+        "first_name": "Alice",
+        "username": "alice123",
+        "type": "private"
+      }
+    }
+  },
+
+  "no_text_message": {
+    "update_id": 100000006,
+    "message": {
+      "message_id": 20,
+      "date": 1773242000,
+      "text": "",
+      "from": {
+        "id": 123456789,
+        "is_bot": false,
+        "first_name": "Alice",
+        "username": "alice123",
+        "language_code": "en"
+      },
+      "chat": {
+        "id": 123456789,
+        "first_name": "Alice",
+        "username": "alice123",
+        "type": "private"
+      }
+    }
+  },
+
+  "no_message_update": {
+    "update_id": 100000007
+  }
+}
