@@ -1,10 +1,8 @@
 """
-FastAPI application entry point for the Cron Service v2.0.
+FastAPI application entry point for the Cron Service v3.0.
 
-Wires together all service components:
-- DatabaseServiceClient → TaskService → Task CRUD routes
-- MessageDispatchClient + TaskExecutor → PollingScheduler → Scheduler routes
-- EventPublisher → TaskExecutor (telemetry)
+Lightweight global time-trigger service.  Maintains an in-memory
+schedule table and publishes events to the broker when schedules fire.
 """
 
 import logging
@@ -16,33 +14,21 @@ from fastapi import FastAPI
 from .config.settings import get_settings
 from .events.publisher import EventPublisher
 from .routes.health_routes import router as health_router
-from .routes.scheduler_routes import router as scheduler_router
-from .routes.task_routes import router as task_router
-from .services.db_client import DatabaseServiceClient
-from .services.dispatcher import MessageDispatchClient
-from .services.scheduler import PollingScheduler
-from .services.task_executor import TaskExecutor
-from .services.task_service import TaskService
+from .routes.schedule_routes import router as schedule_router
+from .services.scheduler import CronScheduler
 
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------ #
-# Module-level singletons (set during lifespan)
+# Module-level singleton (set during lifespan)
 # ------------------------------------------------------------------ #
 
-_task_service: Optional[TaskService] = None
-_scheduler: Optional[PollingScheduler] = None
+_scheduler: Optional[CronScheduler] = None
 
 
-def get_app_task_service() -> TaskService:
-    """Return the application-level TaskService singleton."""
-    assert _task_service is not None, "TaskService not initialized."
-    return _task_service
-
-
-def get_app_scheduler() -> PollingScheduler:
-    """Return the application-level PollingScheduler singleton."""
-    assert _scheduler is not None, "PollingScheduler not initialized."
+def get_app_scheduler() -> CronScheduler:
+    """Return the application-level CronScheduler singleton."""
+    assert _scheduler is not None, "CronScheduler not initialized."
     return _scheduler
 
 
@@ -57,18 +43,15 @@ async def lifespan(app: FastAPI):
     Application lifespan handler.
 
     Startup:
-        1. Create DatabaseServiceClient.
-        2. Create TaskService.
-        3. Create MessageDispatchClient.
-        4. Create EventPublisher.
-        5. Create TaskExecutor.
-        6. Create and start PollingScheduler.
+        1. Create EventPublisher.
+        2. Create CronScheduler and load schedules from config.
+        3. Start the scheduler background loop.
 
     Shutdown:
-        1. Stop PollingScheduler.
-        2. Close EventPublisher.
+        1. Stop the scheduler.
+        2. Close the EventPublisher.
     """
-    global _task_service, _scheduler
+    global _scheduler
 
     settings = get_settings()
 
@@ -84,53 +67,29 @@ async def lifespan(app: FastAPI):
         settings.SERVICE_VERSION,
     )
 
-    # 1. Database Service Client
-    db_client = DatabaseServiceClient(
-        base_url=settings.DATABASE_SERVICE_URL,
-        timeout_seconds=settings.DATABASE_SERVICE_TIMEOUT,
-    )
-
-    # 2. Task Service
-    _task_service = TaskService(db_client=db_client)
-
-    # 3. Message Dispatch Hub Client
-    dispatch_client = MessageDispatchClient(
-        base_url=settings.DISPATCH_HUB_URL,
-        timeout_seconds=settings.DISPATCH_HUB_TIMEOUT,
-    )
-
-    # 4. Event Publisher
-    event_publisher = EventPublisher(
+    # 1. Event Publisher
+    publisher = EventPublisher(
         broker_url=settings.EVENT_BROKER_URL,
-        enabled=settings.EVENT_PUBLISH_ENABLED,
         timeout_seconds=settings.EVENT_PUBLISH_TIMEOUT,
         max_retries=settings.EVENT_PUBLISH_RETRIES,
     )
 
-    # 5. Task Executor
-    executor = TaskExecutor(
-        db_client=db_client,
-        dispatch_client=dispatch_client,
-        event_publisher=event_publisher,
+    # 2. Scheduler
+    _scheduler = CronScheduler(
+        publisher=publisher,
+        tick_interval_seconds=settings.TICK_INTERVAL_SECONDS,
     )
+    _scheduler.load_schedules(settings.get_schedules())
 
-    # 6. Polling Scheduler
-    _scheduler = PollingScheduler(
-        db_client=db_client,
-        executor=executor,
-        poll_interval_seconds=settings.POLL_INTERVAL_SECONDS,
-        max_tasks_per_poll=settings.MAX_TASKS_PER_POLL,
-    )
-
-    if settings.SCHEDULER_ENABLED:
-        await _scheduler.start()
+    # 3. Start
+    await _scheduler.start()
 
     logger.info(
-        "%s v%s started (scheduler=%s, poll_interval=%ds).",
+        "%s v%s started (tick_interval=%ds, schedules=%d).",
         settings.SERVICE_NAME,
         settings.SERVICE_VERSION,
-        "enabled" if settings.SCHEDULER_ENABLED else "disabled",
-        settings.POLL_INTERVAL_SECONDS,
+        settings.TICK_INTERVAL_SECONDS,
+        len(_scheduler.get_schedules()),
     )
 
     yield  # Application is running
@@ -139,8 +98,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down %s ...", settings.SERVICE_NAME)
     if _scheduler and _scheduler.running:
         await _scheduler.stop()
-    await event_publisher.close()
-    _task_service = None
+    await publisher.close()
     _scheduler = None
     logger.info("Shutdown complete.")
 
@@ -157,10 +115,9 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Cron Service",
         description=(
-            "Scheduled task management and polling engine for proactive "
-            "outbound messaging in the ECHO platform. Provides task CRUD "
-            "for service registrants and an internal polling scheduler "
-            "that dispatches due tasks to the Message Dispatch Hub."
+            "Lightweight global time-trigger service for the ECHO platform.  "
+            "Maintains a cron schedule table and publishes events to the "
+            "internal messaging layer when schedules fire."
         ),
         version=settings.SERVICE_VERSION,
         lifespan=lifespan,
@@ -168,8 +125,7 @@ def create_app() -> FastAPI:
 
     # Register routes
     app.include_router(health_router)
-    app.include_router(task_router)
-    app.include_router(scheduler_router)
+    app.include_router(schedule_router)
 
     return app
 

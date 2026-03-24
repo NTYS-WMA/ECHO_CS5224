@@ -1,57 +1,25 @@
 """
-Data models for the Cron Service v2.0.
+Data models for the Cron Service v3.0.
 
-Exports domain entities, request/response models, and event payloads.
+Exports schedule entry, event, request, and response models.
 """
 
-from .domain import (
-    ScheduleConfig,
-    ScheduledTask,
-    TaskPayload,
-    TaskStatus,
-    TaskType,
-)
-from .events import (
-    OutboundMessagePayload,
-    TaskDispatchedEvent,
-    TaskFailedEvent,
-)
-from .requests import (
-    ListTasksParams,
-    ManualPollTriggerRequest,
-    RegisterTaskRequest,
-    UpdateTaskRequest,
-)
+from .domain import ScheduleEntry
+from .events import CronTriggeredEvent
+from .requests import ManualTriggerRequest
 from .responses import (
-    PollCycleResponse,
-    PollExecutionResult,
+    ManualTriggerResponse,
+    ScheduleEntryResponse,
+    ScheduleListResponse,
     SchedulerStatusResponse,
-    TaskDeletedResponse,
-    TaskListResponse,
-    TaskResponse,
 )
 
 __all__ = [
-    # Domain
-    "ScheduleConfig",
-    "ScheduledTask",
-    "TaskPayload",
-    "TaskStatus",
-    "TaskType",
-    # Events
-    "OutboundMessagePayload",
-    "TaskDispatchedEvent",
-    "TaskFailedEvent",
-    # Requests
-    "ListTasksParams",
-    "ManualPollTriggerRequest",
-    "RegisterTaskRequest",
-    "UpdateTaskRequest",
-    # Responses
-    "PollCycleResponse",
-    "PollExecutionResult",
+    "ScheduleEntry",
+    "CronTriggeredEvent",
+    "ManualTriggerRequest",
+    "ManualTriggerResponse",
+    "ScheduleEntryResponse",
+    "ScheduleListResponse",
     "SchedulerStatusResponse",
-    "TaskDeletedResponse",
-    "TaskListResponse",
-    "TaskResponse",
 ]
