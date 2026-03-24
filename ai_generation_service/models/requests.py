@@ -108,7 +108,7 @@ class TemplateGenerationRequest(BaseModel):
             "Variable values to substitute into the template. "
             "Must satisfy the template's variable schema."
         ),
-        examples=[{"context_block": "Relationship tier: close_friend\nDays inactive: 3"}],
+        examples=[{"user_prompt": "Based on the following context, compose a short check-in message.\n\nRelationship tier: close_friend\nDays inactive: 3"}],
     )
     messages: Optional[List[MessageItem]] = Field(
         None,

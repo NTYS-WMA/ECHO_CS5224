@@ -1,17 +1,17 @@
 {
   "template_id": "tpl_proactive_outreach",
   "name": "Proactive Outreach Message",
-  "description": "System-level template for generating proactive check-in messages. The business layer provides the fully assembled context block including relationship tier, affinity, inactivity, and user preferences.",
-  "version": "1.0.0",
+  "description": "System-level template for generating proactive check-in messages. The business caller assembles the full prompt (including relationship context, user preferences, and generation instructions) and passes it as a single user_prompt variable.",
+  "version": "2.0.0",
   "owner": "ai-generation-service",
   "category": "proactive",
   "system_prompt": "You are ECHO, a warm and thoughtful AI companion. You are reaching out to a user you have not heard from in a while. Your message should feel natural, caring, and not pushy. Keep it brief and conversational. Do not ask too many questions at once. Match the tone to the relationship level and the user's known preferences.",
-  "user_prompt_template": "Based on the following context, compose a short, natural check-in message to re-engage this user. The message should feel genuine and not automated.\n\n{{context_block}}\n\nGenerate only the message text, nothing else.",
+  "user_prompt_template": "{{user_prompt}}",
   "variables": {
-    "context_block": {
+    "user_prompt": {
       "type": "string",
       "required": true,
-      "description": "The full context block assembled by the business layer, including relationship tier, affinity score, days inactive, user preferences, recent summary, etc."
+      "description": "The full proactive outreach prompt assembled by the business layer, including relationship context, user preferences, tone, and generation instructions."
     }
   },
   "defaults": {
@@ -20,5 +20,5 @@
   },
   "tags": ["proactive", "outreach", "engagement"],
   "created_at": "2026-03-23T00:00:00Z",
-  "updated_at": "2026-03-23T00:00:00Z"
+  "updated_at": "2026-03-24T00:00:00Z"
 }

@@ -227,20 +227,37 @@ The **primary** generation endpoint. Business callers specify a `template_id` an
 
 **Invocation Patterns**:
 
+All three core use cases (chat, summarization, proactive) use the same `user_prompt` variable. The caller assembles the full prompt; the AI service provides the system-level prompt via the template.
+
 **Pattern A — Variable-based** (for summarization, proactive, analysis, etc.):
+
+All preset templates accept a single `user_prompt` variable. The caller is responsible for assembling the full prompt content.
 
 ```json
 {
   "user_id": "usr_9f2a7c41",
   "template_id": "tpl_proactive_outreach",
   "variables": {
-    "context_block": "Relationship tier: close_friend\nAffinity score: 0.74\nDays inactive: 3\nTone: warm\nRecent context: User enjoys evening workouts"
+    "user_prompt": "Based on the following context, compose a short, natural check-in message to re-engage this user.\n\nRelationship tier: close_friend\nAffinity score: 0.74\nDays inactive: 3\nTone: warm\nRecent context: User enjoys evening workouts\n\nGenerate only the message text, nothing else."
   },
   "correlation_id": "evt-6001"
 }
 ```
 
+```json
+{
+  "user_id": "usr_9f2a7c41",
+  "template_id": "tpl_memory_compaction",
+  "variables": {
+    "user_prompt": "Please summarize the following conversation into a compact memory entry.\nSummary type: memory_compaction\n\nConversation:\n[user]: I went for a run this evening.\n[assistant]: That's great! How did it go?\n\nProvide a concise summary capturing the user's key preferences, emotional state, and important facts."
+  },
+  "correlation_id": "evt-022"
+}
+```
+
 **Pattern B — Message-based** (for multi-turn chat):
+
+For `tpl_chat_completion`, callers can also pass a full conversation history via `messages` instead of `variables`. The template's system prompt is merged with the caller's message list.
 
 ```json
 {
@@ -501,8 +518,10 @@ The following templates are pre-loaded on service startup:
 | Template ID | Name | Category | Variables | Default Temp | Default Max Tokens |
 |-------------|------|----------|-----------|-------------|-------------------|
 | `tpl_chat_completion` | Chat Completion | chat | `user_prompt` | 0.7 | 512 |
-| `tpl_memory_compaction` | Memory Compaction Summary | summarization | `summary_type`, `conversation_text` | 0.3 | 300 |
-| `tpl_proactive_outreach` | Proactive Outreach Message | proactive | `context_block` | 0.8 | 150 |
+| `tpl_memory_compaction` | Memory Compaction Summary | summarization | `user_prompt` | 0.3 | 300 |
+| `tpl_proactive_outreach` | Proactive Outreach Message | proactive | `user_prompt` | 0.8 | 150 |
 | `tpl_sentiment_analysis` | Sentiment Analysis | analysis | `text`, `output_format` (opt) | 0.2 | 200 |
 | `tpl_topic_extraction` | Topic Extraction | analysis | `conversation_text` | 0.2 | 300 |
 | `tpl_safety_filter` | Safety Content Filter | safety | `content` | 0.0 | 200 |
+
+> **Note**: The three core business templates (`tpl_chat_completion`, `tpl_memory_compaction`, `tpl_proactive_outreach`) all accept a single `user_prompt` variable. The caller is responsible for assembling the full prompt content; the AI service provides the system-level prompt (identity, safety, role instructions) via the template. See the [README](./README.md#calling-convention-for-business-services) for detailed usage examples per use case.
