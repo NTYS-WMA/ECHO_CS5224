@@ -84,7 +84,7 @@ class TemplateGenerationRequest(BaseModel):
     prompt from the template and executes it.
 
     Source: Any business service (Conversation Orchestrator, Memory Service,
-    Proactive Engagement Service, etc.)
+    Cron Service, etc.)
     """
 
     user_id: str = Field(
@@ -129,6 +129,40 @@ class TemplateGenerationRequest(BaseModel):
         None,
         description="Correlation ID for distributed tracing.",
         examples=["evt-001"],
+    )
+
+
+# ------------------------------------------------------------------ #
+# Embedding Request
+# ------------------------------------------------------------------ #
+
+
+class EmbeddingRequest(BaseModel):
+    """
+    Request body for POST /api/v1/generation/embeddings.
+
+    Generates a vector embedding for the given input text. Used by
+    business services for semantic search, similarity matching, and
+    retrieval-augmented generation (RAG).
+
+    Source: Any business service (Memory Service, Search Service, etc.)
+    """
+
+    user_id: str = Field(
+        ...,
+        description="Internal user identifier.",
+        examples=["usr_9f2a7c41"],
+    )
+    input: str = Field(
+        ...,
+        min_length=1,
+        description="The text to generate an embedding for.",
+        examples=["User enjoys evening workouts and friendly check-ins."],
+    )
+    correlation_id: Optional[str] = Field(
+        None,
+        description="Correlation ID for distributed tracing.",
+        examples=["evt-emb-001"],
     )
 
 
@@ -297,7 +331,7 @@ class ProactiveMessageRequest(BaseModel):
     """
     Request body for POST /api/v1/generation/proactive-messages.
 
-    Source: Proactive Engagement Service
+    Source: Cron Service
 
     NOTE: This is a legacy endpoint. New callers should use
     POST /api/v1/generation/execute with template_id instead.

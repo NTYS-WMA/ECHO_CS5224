@@ -1,6 +1,6 @@
 # AI Generation Service — API Interface Reference
 
-> **Version**: 2.1.0
+> **Version**: 2.2.0
 > **Last Updated**: 2026-03-24
 > **Maintained by**: AI Generation Service Team  
 > **Architecture Role**: AI Execution Engine + Prompt Template Management
@@ -13,7 +13,8 @@
 2. [Access Information](#2-access-information)
 3. [Template Management APIs](#3-template-management-apis)
 4. [Generation APIs](#4-generation-apis)
-   - [4.4 Migration Guide](#44-migration-guide-legacy-endpoints--execute)
+   - [4.2 Embedding API](#42-post-apiv1generationembeddings--generate-embedding)
+   - [4.5 Migration Guide](#45-migration-guide-legacy-endpoints--execute)
 5. [Health and Readiness](#5-health-and-readiness)
 6. [Published Events](#6-published-events)
 7. [Error Handling](#7-error-handling)
@@ -300,7 +301,58 @@ For `tpl_chat_completion`, callers can also pass a full conversation history via
 
 ---
 
-### 4.2 Active Legacy: POST /api/v1/generation/chat-completions
+### 4.2 POST /api/v1/generation/embeddings — Generate Embedding
+
+Generate a dense vector embedding for the given input text. Uses the configured embedding model (Amazon Titan Embeddings v2 by default) via the same provider infrastructure as `/execute` (retry + fallback).
+
+**Request Body**:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `user_id` | string | Yes | Internal user identifier |
+| `input` | string | Yes | The text to generate an embedding for (min 1 character) |
+| `correlation_id` | string | No | Correlation ID for distributed tracing |
+
+**Request Example**:
+
+```json
+{
+  "user_id": "usr_9f2a7c41",
+  "input": "User enjoys evening workouts and friendly check-ins.",
+  "correlation_id": "evt-emb-001"
+}
+```
+
+**Response** `200 OK`:
+
+```json
+{
+  "response_id": "gen-a1b2c3d4e5f6",
+  "embedding": [0.0123, -0.0456, 0.0789, ...],
+  "dimension": 1024,
+  "model": "amazon.titan-embed-text-v2:0",
+  "usage": {
+    "input_tokens": 12,
+    "output_tokens": 0
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `response_id` | string | Unique identifier for this response |
+| `embedding` | array of float | The embedding vector |
+| `dimension` | integer | Dimensionality of the embedding vector |
+| `model` | string | Model identifier used for embedding |
+| `usage` | UsageInfo | Token usage (`output_tokens` is always 0 for embeddings) |
+
+**Errors**: Same error codes as `/execute` (`PROVIDER_TIMEOUT` 503, `PROVIDER_ERROR` 500, `INTERNAL_ERROR` 500).
+
+**Configuration**: The embedding model is configured via `AI_GEN_BEDROCK_EMBEDDING_MODEL_ID` (default: `amazon.titan-embed-text-v2:0`).
+
+---
+
+### 4.3 Active Legacy: POST /api/v1/generation/chat-completions
 
 > **Status**: ✅ Implemented and actively called by **Channel Gateway Orchestrator** (`ai_generation_client.py`). Maintain until Orchestrator migrates to `/execute`.
 
@@ -353,7 +405,7 @@ Accepts a conversation message list and returns an AI-generated reply. If `templ
 
 ---
 
-### 4.3 Inactive Legacy Endpoints (No Active Callers)
+### 4.4 Inactive Legacy Endpoints (No Active Callers)
 
 > **Status**: ⚠️ Code implemented but **no service in the codebase currently calls these endpoints**. Candidates for removal in a future cleanup pass once confirmed that no planned callers exist.
 
@@ -371,7 +423,7 @@ Accepts relationship context and generates a personalized check-in message. If `
 
 ---
 
-### 4.4 Migration Guide: Legacy Endpoints → `/execute`
+### 4.5 Migration Guide: Legacy Endpoints → `/execute`
 
 This section helps business teams migrate from the legacy endpoints (defined in the architecture draft) to the unified `/execute` endpoint. For each use case, the **Before** shows the old calling convention and the **After** shows the new one.
 
@@ -483,7 +535,7 @@ The old endpoint would internally fetch conversation messages from the Conversat
 
 ---
 
-#### Use Case C: Proactive Outreach Message (Proactive Engagement Service)
+#### Use Case C: Proactive Outreach Message (Cron Service)
 
 **Before** — `POST /api/v1/generation/proactive-messages` (architecture draft):
 
@@ -574,7 +626,7 @@ Basic liveness check.
 {
   "status": "healthy",
   "service": "ai-generation-service",
-  "version": "2.1.0"
+  "version": "2.2.0"
 }
 ```
 

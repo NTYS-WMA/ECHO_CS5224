@@ -30,6 +30,6 @@ AI_GENERATION_COMPLETED = "ai.generation.completed"
 MEDIA_ASSET_READY = "media.asset.ready"
 MEDIA_GENERATION_FAILED = "media.generation.failed"
 
-#Proactive Engagement
-PROACTIVE_SCAN_REQUESTED = "proactive.scan.requested"
-PROACTIVE_DISPATCH_COMPLETED = "proactive.dispatch.completed"
+#Cron (published by the Cron Service — listed here for reference only)
+CRON_TASK_DISPATCHED = "cron.task.dispatched"
+CRON_TASK_FAILED = "cron.task.failed"
