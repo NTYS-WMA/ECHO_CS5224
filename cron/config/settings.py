@@ -28,7 +28,7 @@ class Settings(BaseSettings):
         description="Bind host.",
     )
     PORT: int = Field(
-        default=8002,
+        default=8005,
         description="HTTP port for the service.",
     )
     LOG_LEVEL: str = Field(
@@ -74,14 +74,23 @@ class Settings(BaseSettings):
     )
 
     # Event Publishing (Internal Messaging Layer)
-    # TO BE UPDATED: Actual broker implementation details
     EVENT_BROKER_URL: str = Field(
         default="http://localhost:9092",
-        description="URL of the internal messaging broker (Kafka / SNS / etc.).",
+        description="Base URL of the HTTP event broker.",
     )
     EVENT_PUBLISH_ENABLED: bool = Field(
         default=True,
         description="Whether to publish lifecycle events.",
+    )
+    EVENT_PUBLISH_TIMEOUT: int = Field(
+        default=5,
+        description="HTTP timeout for event publish calls (seconds).",
+    )
+    EVENT_PUBLISH_RETRIES: int = Field(
+        default=2,
+        ge=0,
+        le=5,
+        description="Number of retries for failed event publish attempts.",
     )
 
     # HTTP client settings

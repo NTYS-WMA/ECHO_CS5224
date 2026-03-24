@@ -318,13 +318,13 @@ Trigger a single poll cycle manually (for testing / ops). Does not affect the ba
 
 Events published to the Internal Messaging Layer for downstream consumers.
 
-### 6.1 `proactive.task.dispatched`
+### 6.1 `cron.task.dispatched`
 
 Published when a task is successfully dispatched to the Message Dispatch Hub.
 
 ```json
 {
-  "event_type": "proactive.task.dispatched",
+  "event_type": "cron.task.dispatched",
   "event_id": "evt_xxx",
   "task_id": "task_xxx",
   "user_id": "usr_xxx",
@@ -335,13 +335,13 @@ Published when a task is successfully dispatched to the Message Dispatch Hub.
 }
 ```
 
-### 6.2 `proactive.task.failed`
+### 6.2 `cron.task.failed`
 
 Published when a task exhausts all retries and fails permanently.
 
 ```json
 {
-  "event_type": "proactive.task.failed",
+  "event_type": "cron.task.failed",
   "event_id": "evt_xxx",
   "task_id": "task_xxx",
   "user_id": "usr_xxx",
@@ -353,23 +353,10 @@ Published when a task exhausts all retries and fails permanently.
 }
 ```
 
-### 6.3 `conversation.outbound`
-
-Published as the dispatch payload sent to the Message Dispatch Hub.
-
-```json
-{
-  "event_type": "conversation.outbound",
-  "event_id": "evt_xxx",
-  "task_id": "task_xxx",
-  "user_id": "usr_xxx",
-  "channel": "telegram",
-  "content": "Hey, how have you been?",
-  "message_type": "text",
-  "metadata": {},
-  "schema_version": "2.0"
-}
-```
+> **Note**: The Cron Service does **not** publish `conversation.outbound` events.
+> Outbound message delivery is handled entirely via HTTP to the Message Dispatch
+> Hub. The `conversation.outbound` event topic is owned exclusively by the
+> Channel Gateway Orchestrator for reactive replies.
 
 ---
 
