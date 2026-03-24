@@ -13,6 +13,7 @@
 2. [Access Information](#2-access-information)
 3. [Template Management APIs](#3-template-management-apis)
 4. [Generation APIs](#4-generation-apis)
+   - [4.4 Migration Guide](#44-migration-guide-legacy-endpoints--execute)
 5. [Health and Readiness](#5-health-and-readiness)
 6. [Published Events](#6-published-events)
 7. [Error Handling](#7-error-handling)
@@ -364,6 +365,8 @@ Accepts a message window reference and generates a compact summary. If `template
 
 Accepts relationship context and generates a personalized check-in message. If `template_id` is omitted, uses `tpl_proactive_outreach`.
 
+> **Note**: The `usage` field in the proactive message response is optional and may be `null`.
+
 > See the Swagger UI at `/docs` for detailed request/response schemas for these endpoints.
 
 ---
@@ -571,7 +574,7 @@ Basic liveness check.
 {
   "status": "healthy",
   "service": "ai-generation-service",
-  "version": "2.0.0"
+  "version": "2.1.0"
 }
 ```
 
@@ -638,6 +641,12 @@ Published when a generation request fails after all retry and fallback attempts.
 }
 ```
 
+> **Note**: The `operation` field reflects the code path used:
+> - Via `/execute`: `"execute:<template_id>"` (e.g., `"execute:tpl_chat_completion"`)
+> - Via legacy `/chat-completions`: `"chat_completion"`
+> - Via legacy `/summaries`: `"summary_generation"`
+> - Via legacy `/proactive-messages`: `"proactive_message"`
+
 ---
 
 ## 7. Error Handling
@@ -650,6 +659,7 @@ Published when a generation request fails after all retry and fallback attempts.
 | 500 | `PROVIDER_ERROR` | AI provider returned an error after all retries | No |
 | 500 | `INTERNAL_ERROR` | Unexpected server error | No |
 | 503 | `PROVIDER_TIMEOUT` | AI provider timed out after all retries | Yes |
+| 503 | `CONVERSATION_STORE_UNAVAILABLE` | Failed to retrieve conversation messages from store | Yes |
 
 **Error Response Body**:
 
@@ -706,13 +716,13 @@ Published when a generation request fails after all retry and fallback attempts.
 
 The following templates are pre-loaded on service startup:
 
-| Template ID | Name | Category | Variables | Default Temp | Default Max Tokens |
-|-------------|------|----------|-----------|-------------|-------------------|
-| `tpl_chat_completion` | Chat Completion | chat | `user_prompt` | 0.7 | 512 |
-| `tpl_memory_compaction` | Memory Compaction Summary | summarization | `user_prompt` | 0.3 | 300 |
-| `tpl_proactive_outreach` | Proactive Outreach Message | proactive | `user_prompt` | 0.8 | 150 |
-| `tpl_sentiment_analysis` | Sentiment Analysis | analysis | `text`, `output_format` (opt) | 0.2 | 200 |
-| `tpl_topic_extraction` | Topic Extraction | analysis | `conversation_text` | 0.2 | 300 |
-| `tpl_safety_filter` | Safety Content Filter | safety | `content` | 0.0 | 200 |
+| Template ID | Version | Name | Category | Variables | Default Temp | Default Max Tokens |
+|-------------|---------|------|----------|-----------|-------------|-------------------|
+| `tpl_chat_completion` | 1.0.0 | Chat Completion | chat | `user_prompt` | 0.7 | 512 |
+| `tpl_memory_compaction` | 2.0.0 | Memory Compaction Summary | summarization | `user_prompt` | 0.3 | 300 |
+| `tpl_proactive_outreach` | 2.0.0 | Proactive Outreach Message | proactive | `user_prompt` | 0.8 | 150 |
+| `tpl_sentiment_analysis` | 1.0.0 | Sentiment Analysis | analysis | `text`, `output_format` (opt) | 0.2 | 200 |
+| `tpl_topic_extraction` | 1.0.0 | Topic Extraction | analysis | `conversation_text` | 0.2 | 300 |
+| `tpl_safety_filter` | 1.0.0 | Safety Content Filter | safety | `content` | 0.0 | 200 |
 
 > **Note**: The three core business templates (`tpl_chat_completion`, `tpl_memory_compaction`, `tpl_proactive_outreach`) all accept a single `user_prompt` variable. The caller is responsible for assembling the full prompt content; the AI service provides the system-level prompt (identity, safety, role instructions) via the template. See the [README](./README.md#calling-convention-for-business-services) for detailed usage examples per use case.

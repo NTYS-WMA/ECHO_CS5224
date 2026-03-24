@@ -87,6 +87,7 @@ def _handle_unexpected_error(e: Exception, correlation_id=None):
     responses={
         400: {"model": ErrorResponse, "description": "Template not found or render error"},
         500: {"model": ErrorResponse, "description": "Generation failed after all retries"},
+        503: {"model": ErrorResponse, "description": "Provider timeout (retryable)"},
     },
     summary="Execute a template-based generation",
     description=(
@@ -126,6 +127,7 @@ async def execute_generation(
     response_model=ChatCompletionResponse,
     responses={
         500: {"model": ErrorResponse, "description": "Generation failed after all retries"},
+        503: {"model": ErrorResponse, "description": "Provider timeout or upstream unavailable (retryable)"},
     },
     summary="Generate a chat completion (legacy)",
     description=(
@@ -163,6 +165,7 @@ async def chat_completion(
     response_model=SummaryGenerationResponse,
     responses={
         500: {"model": ErrorResponse, "description": "Generation failed after all retries"},
+        503: {"model": ErrorResponse, "description": "Provider timeout or upstream unavailable (retryable)"},
     },
     summary="Generate a conversation summary (legacy)",
     description=(
@@ -200,6 +203,7 @@ async def generate_summary(
     response_model=ProactiveMessageResponse,
     responses={
         500: {"model": ErrorResponse, "description": "Generation failed after all retries"},
+        503: {"model": ErrorResponse, "description": "Provider timeout or upstream unavailable (retryable)"},
     },
     summary="Generate a proactive outreach message (legacy)",
     description=(
