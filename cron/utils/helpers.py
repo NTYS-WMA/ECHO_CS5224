@@ -1,8 +1,8 @@
 """
-Utility functions for the Cron Service v2.0.
+Utility functions for the Cron Service v3.0.
 
-Provides ID generation, cron expression parsing, and next-run-at
-computation for scheduled tasks.
+Provides ID generation, cron expression parsing, and next-fire-time
+computation for schedule entries.
 """
 
 import uuid
@@ -10,19 +10,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 
-def generate_task_id() -> str:
-    """Generate a unique task identifier."""
-    return f"task_{uuid.uuid4().hex[:12]}"
-
-
 def generate_event_id() -> str:
     """Generate a unique event identifier."""
     return f"evt_{uuid.uuid4().hex[:12]}"
-
-
-def generate_poll_id() -> str:
-    """Generate a unique poll cycle identifier."""
-    return f"poll_{uuid.uuid4().hex[:10]}"
 
 
 def utc_now() -> datetime:
@@ -37,24 +27,17 @@ def compute_next_run_at(
     from_time: Optional[datetime] = None,
 ) -> Optional[datetime]:
     """
-    Compute the next execution time for a task.
+    Compute the next fire time for a schedule entry.
 
     Priority:
-    1. scheduled_at — used as-is for one-time tasks.
+    1. scheduled_at — used as-is (for one-shot schedules).
     2. interval_seconds — add interval to from_time (or now).
     3. cron_expression — parse and compute next match.
 
-    Args:
-        scheduled_at: Specific datetime for one-time execution.
-        cron_expression: Cron expression for recurring tasks.
-        interval_seconds: Fixed interval in seconds.
-        from_time: Base time for interval/cron computation (defaults to now).
-
     Returns:
-        Next execution datetime (UTC), or None if cannot be determined.
+        Next fire datetime (UTC), or None if cannot be determined.
     """
     if scheduled_at is not None:
-        # Ensure UTC
         if scheduled_at.tzinfo is None:
             return scheduled_at.replace(tzinfo=timezone.utc)
         return scheduled_at.astimezone(timezone.utc)
@@ -103,14 +86,7 @@ def _next_cron_match(expression: str, from_time: datetime) -> Optional[datetime]
     Supports: *, specific values, ranges (1-5), steps (*/15), lists (1,3,5)
 
     This is a simplified implementation suitable for development.
-    For production, consider using the `croniter` library.
-
-    Args:
-        expression: 5-field cron expression (e.g., "0 9 * * 1-5").
-        from_time: Base time to search from.
-
-    Returns:
-        Next matching datetime (UTC), or None if invalid expression.
+    For production, consider using the ``croniter`` library.
     """
     try:
         fields = expression.strip().split()
@@ -129,13 +105,10 @@ def _next_cron_match(expression: str, from_time: datetime) -> Optional[datetime]
             return None
 
         # Convert cron day-of-week (0=Sun) to Python weekday (0=Mon)
-        # cron: 0=Sun,1=Mon,...,6=Sat → Python: 0=Mon,...,6=Sun
         python_dows = set()
         for d in dows_cron:
-            python_dows.add((d - 1) % 7)  # 0(Sun)->6, 1(Mon)->0, etc.
+            python_dows.add((d - 1) % 7)
 
-        # Search forward up to 400 days (minute by minute for first 48h,
-        # then hour by hour)
         candidate = from_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
         if candidate.tzinfo is None:
             candidate = candidate.replace(tzinfo=timezone.utc)
@@ -151,7 +124,6 @@ def _next_cron_match(expression: str, from_time: datetime) -> Optional[datetime]
                 and candidate.minute in minutes
             ):
                 return candidate.replace(tzinfo=timezone.utc)
-            # Advance: skip by minute for first 48h, then by hour
             if candidate - from_time < timedelta(hours=48):
                 candidate += timedelta(minutes=1)
             else:
