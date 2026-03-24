@@ -1,22 +1,22 @@
 # Logging Guide
 
-本文档说明如何使用和配置 Mem0 服务的日志系统。
+This document explains how to use and configure the logging system for the Mem0 service.
 
-## 概述
+## Overview
 
-Mem0 服务实现了分层日志系统，支持不同详细程度的日志输出。日志通过 `LOG_LEVEL` 环境变量控制。
+The Mem0 service implements a layered logging system that supports different levels of verbosity. Logging is controlled via the `LOG_LEVEL` environment variable.
 
-## 日志级别
+## Log Levels
 
-### INFO（默认）
-**用途**: 日常运维监控
+### INFO (Default)
+**Purpose**: Daily operations and monitoring.
 
-**输出内容**:
-- HTTP 请求基本信息（方法、路径、状态码、耗时）
-- 系统初始化信息
-- 错误和异常
+**Output Content**:
+- Basic HTTP request information (method, path, status code, duration)
+- System initialization messages
+- Errors and exceptions
 
-**示例**:
+**Example**:
 ```
 2025-10-04 23:30:15,123 - main - INFO - Mem0 Memory and UserProfile instances initialized successfully
 2025-10-04 23:30:15,124 - main - INFO - Logging level set to: INFO
@@ -25,178 +25,178 @@ Mem0 服务实现了分层日志系统，支持不同详细程度的日志输出
 ```
 
 ### DEBUG
-**用途**: 开发调试、问题诊断
+**Purpose**: Development debugging and problem diagnosis.
 
-**输出内容**（除 INFO 级别外，还包括）:
-- 请求查询参数
-- 请求 body 数据（摘要）
-- 响应数据（摘要）
-- LLM 调用详情
-- 数据库操作详情
-- Profile 提取/更新过程
+**Output Content** (includes everything in INFO plus):
+- Request query parameters
+- Request body data (summarized)
+- Response data (summarized)
+- LLM call details
+- Database operation details
+- Profile extraction/update process details
 
-**示例**:
+**Example**:
 ```
 2025-10-04 23:30:20,456 - main - INFO - → POST /profile
 2025-10-04 23:30:20,457 - main - DEBUG - Query params: {}
-2025-10-04 23:30:20,458 - main - DEBUG - [set_profile] Request body: {user_id: test_001, messages: 3 items, first: '我叫张三，今年25岁...'}
+2025-10-04 23:30:20,458 - main - DEBUG - [set_profile] Request body: {user_id: test_001, messages: 3 items, first: 'My name is Zhang San, I am 25 years old...'}
 2025-10-04 23:30:21,123 - mem0.user_profile.profile_manager - DEBUG - Stage 1: Extracting profile information from messages
 2025-10-04 23:30:22,456 - mem0.user_profile.profile_manager - DEBUG - Stage 3: Deciding operations (ADD/UPDATE/DELETE)
 2025-10-04 23:30:22,789 - main - DEBUG - [set_profile] Response: {success: True, operations: {'added': 2, 'updated': 0, 'deleted': 0}}
 2025-10-04 23:30:22,790 - main - INFO - ← POST /profile - Status: 200 - Duration: 2.333s
 ```
 
-## 配置方法
+## Configuration
 
-### 方法 1: 环境变量（推荐）
+### Method 1: Environment Variables (Recommended)
 
-在 `.env` 文件中设置：
+Set in your `.env` file:
 ```bash
 LOG_LEVEL=DEBUG
 ```
 
-然后启动服务：
+Then start the service:
 ```bash
 docker-compose up -d
 ```
 
-### 方法 2: Docker Compose 命令行
+### Method 2: Docker Compose CLI
 
-临时使用 DEBUG 模式：
+Temporary DEBUG mode:
 ```bash
 LOG_LEVEL=DEBUG docker-compose up
 ```
 
-### 方法 3: Docker 运行时
+### Method 3: Docker Runtime
 
-如果直接运行 Docker 容器：
+If running the Docker container directly:
 ```bash
 docker run -e LOG_LEVEL=DEBUG mem0-service
 ```
 
-## 查看日志
+## Viewing Logs
 
-### 实时查看所有日志
+### Real-time logs
 ```bash
 docker-compose logs -f mem0-service
 ```
 
-### 查看最近 N 条日志
+### View last N lines
 ```bash
 docker-compose logs --tail 100 mem0-service
 ```
 
-### 查看特定时间的日志
+### View logs by time
 ```bash
-docker-compose logs --since 10m mem0-service  # 最近10分钟
-docker-compose logs --since "2025-10-04T23:00:00" mem0-service  # 指定时间
+docker-compose logs --since 10m mem0-service  # Last 10 minutes
+docker-compose logs --since "2025-10-04T23:00:00" mem0-service  # From specific time
 ```
 
-### 过滤特定类型的日志
+### Filtering logs
 ```bash
-# 只看 UserProfile 相关日志
+# View only UserProfile related logs
 docker-compose logs mem0-service | grep "mem0.user_profile"
 
-# 只看错误
+# View only errors
 docker-compose logs mem0-service | grep "ERROR"
 
-# 只看某个端点
+# View logs for a specific endpoint
 docker-compose logs mem0-service | grep "/profile"
 ```
 
-## 日志结构
+## Log Structure
 
-### 日志格式
+### Log Format
 ```
-时间戳 - 模块名 - 级别 - 消息
+Timestamp - Module Name - Level - Message
 ```
 
-### 模块命名
-- `main`: FastAPI 主应用
-- `middleware`: HTTP 中间件
-- `mem0.user_profile`: UserProfile 模块
-- `mem0.user_profile.profile_manager`: Profile 管理器
-- `mem0.user_profile.database.postgres_manager`: PostgreSQL 管理器
-- `mem0.user_profile.database.mongodb_manager`: MongoDB 管理器
+### Module Naming
+- `main`: FastAPI main application
+- `middleware`: HTTP middleware
+- `mem0.user_profile`: UserProfile module
+- `mem0.user_profile.profile_manager`: Profile manager
+- `mem0.user_profile.database.postgres_manager`: PostgreSQL manager
+- `mem0.user_profile.database.mongodb_manager`: MongoDB manager
 
-## 使用场景
+## Use Cases
 
-### 场景 1: 日常运维
-**配置**: `LOG_LEVEL=INFO`
+### Scenario 1: Daily Operations
+**Config**: `LOG_LEVEL=INFO`
 
-**用途**:
-- 监控请求量和响应时间
-- 发现异常和错误
-- 追踪慢请求
+**Usage**:
+- Monitor request volume and response times
+- Detect anomalies and errors
+- Track slow requests
 
-### 场景 2: 性能调优
-**配置**: `LOG_LEVEL=INFO`
+### Scenario 2: Performance Tuning
+**Config**: `LOG_LEVEL=INFO`
 
-**用途**:
-- 分析请求耗时
-- 识别性能瓶颈
-- 监控 LLM 调用频率
+**Usage**:
+- Analyze request latency
+- Identify performance bottlenecks
+- Monitor LLM call frequency
 
-**分析方法**:
+**Analysis**:
 ```bash
-# 查看慢请求（耗时 > 5秒）
+# Find slow requests (duration > 5s)
 docker-compose logs mem0-service | grep "Duration:" | awk '{print $NF}' | grep -E "[5-9]\.[0-9]+s|[0-9]{2}\.[0-9]+s"
 ```
 
-### 场景 3: 功能调试
-**配置**: `LOG_LEVEL=DEBUG`
+### Scenario 3: Feature Debugging
+**Config**: `LOG_LEVEL=DEBUG`
 
-**用途**:
-- 调试新功能
-- 分析 LLM 提取结果
-- 排查数据不一致问题
+**Usage**:
+- Debug new features
+- Analyze LLM extraction results
+- Troubleshoot data inconsistency issues
 
-**调试流程**:
-1. 设置 `LOG_LEVEL=DEBUG`
-2. 重启服务: `docker-compose restart mem0-service`
-3. 发送测试请求
-4. 查看详细日志
-5. 定位问题
-6. 修复后改回 `LOG_LEVEL=INFO`
+**Workflow**:
+1. Set `LOG_LEVEL=DEBUG`
+2. Restart service: `docker-compose restart mem0-service`
+3. Send test requests
+4. Check detailed logs
+5. Locate the issue
+6. Revert to `LOG_LEVEL=INFO` after fix
 
-### 场景 4: 问题诊断
-**配置**: `LOG_LEVEL=DEBUG`
+### Scenario 4: Problem Diagnosis
+**Config**: `LOG_LEVEL=DEBUG`
 
-**用途**:
-- 排查 bug
-- 理解数据流
-- 分析 LLM 决策过程
+**Usage**:
+- Troubleshooting bugs
+- Understanding data flow
+- Analyzing LLM decision process
 
-**诊断示例**:
+**Example**:
 ```bash
-# 追踪某个 user_id 的所有操作
+# Trace all operations for a specific user_id
 docker-compose logs mem0-service | grep "test_user_001"
 
-# 查看某个请求的完整流程
+# View complete flow for a specific request
 docker-compose logs --since "2025-10-04T23:30:00" mem0-service | grep -A 20 "POST /profile"
 ```
 
-## 日志数据保护
+## Data Protection
 
-### 敏感信息处理
-中间件自动处理敏感信息：
-- ✅ 请求 body 自动截断（最多 200 字符）
-- ✅ messages 数组显示数量，不完全展开
-- ✅ API keys 不会出现在日志中
-- ✅ 用户原始内容仅显示摘要
+### Sensitive Information Handling
+Middleware automatically handles sensitive information:
+- ✅ Request body truncation (max 200 characters)
+- ✅ `messages` array shows count, not full content
+- ✅ API keys do not appear in logs
+- ✅ Raw user content shows only summaries
 
-### DEBUG 模式注意事项
-⚠️ **DEBUG 模式会记录较多数据，生产环境慎用！**
+### DEBUG Mode Warnings
+⚠️ **DEBUG mode records significant data, use with caution in production!**
 
-生产环境建议：
-- 默认使用 INFO 级别
-- 仅在排查问题时临时开启 DEBUG
-- DEBUG 开启后及时关闭
-- 定期清理旧日志
+Production recommendations:
+- Use INFO level by default
+- Enable DEBUG only temporarily for troubleshooting
+- Disable DEBUG immediately after use
+- Regularly clean up old logs
 
-## 日志轮转
+## Log Rotation
 
-Docker logs 会自动轮转，配置在 `docker-compose.yaml`:
+Docker logs rotate automatically as configured in `docker-compose.yaml`:
 
 ```yaml
 logging:
@@ -206,121 +206,121 @@ logging:
     max-file: "3"
 ```
 
-这意味着：
-- 单个日志文件最大 10MB
-- 最多保留 3 个文件
-- 总日志大小约 30MB
+This means:
+- Individual log files are capped at 10MB
+- Maximum of 3 files are kept
+- Total log size is approximately 30MB
 
-## 性能影响
+## Performance Impact
 
-### INFO 级别
-- ✅ 性能影响极小（< 1%）
-- ✅ 适合生产环境
-- ✅ 可以长期开启
+### INFO Level
+- ✅ Minimal impact (< 1%)
+- ✅ Suitable for production
+- ✅ Can be enabled indefinitely
 
-### DEBUG 级别
-- ⚠️ 性能影响约 5-10%
-- ⚠️ 日志量增加 10-20 倍
-- ⚠️ 仅用于调试，不建议生产环境长期开启
+### DEBUG Level
+- ⚠️ Performance impact ~5-10%
+- ⚠️ Log volume increases 10-20x
+- ⚠️ Only for debugging, not recommended for long-term production use
 
-## 自定义日志
+## Custom Logging
 
-如果需要添加自定义日志，可以在代码中使用 Python logging：
+To add custom logs in code, use the Python `logging` module:
 
 ```python
 import logging
 
 logger = logging.getLogger(__name__)
 
-# 始终显示（ERROR, WARNING, INFO）
+# Always visible (ERROR, WARNING, INFO)
 logger.info("User profile updated successfully")
 logger.warning("Evidence count exceeds limit")
 logger.error("Failed to connect to database")
 
-# 仅在 DEBUG 模式显示
+# Only visible in DEBUG mode
 logger.debug("Extracted data: %s", extracted_data)
 logger.debug("LLM response: %s", response)
 ```
 
-## 故障排查
+## Troubleshooting
 
-### 问题: 看不到日志
-**解决方法**:
+### Problem: No logs visible
+**Solution**:
 ```bash
-# 1. 检查容器是否运行
+# 1. Check if container is running
 docker ps | grep mem0
 
-# 2. 检查日志驱动
+# 2. Check log driver
 docker inspect mem0-api | grep LogPath
 
-# 3. 直接查看容器 stdout
+# 3. View container stdout directly
 docker logs mem0-api
 ```
 
-### 问题: DEBUG 模式不生效
-**解决方法**:
+### Problem: DEBUG mode not working
+**Solution**:
 ```bash
-# 1. 确认环境变量设置
+# 1. Verify environment variable
 docker exec mem0-api env | grep LOG_LEVEL
 
-# 2. 重启容器使配置生效
+# 2. Restart container to apply config
 docker-compose restart mem0-service
 
-# 3. 查看启动日志确认
+# 3. Check startup logs for confirmation
 docker-compose logs mem0-service | grep "Logging level"
 ```
 
-### 问题: 日志太多
-**解决方法**:
+### Problem: Too many logs
+**Solution**:
 ```bash
-# 1. 降低日志级别
+# 1. Lower log level
 LOG_LEVEL=INFO docker-compose up -d
 
-# 2. 清理旧日志
+# 2. Clear old logs
 docker-compose logs --tail 0 mem0-service
 
-# 3. 增加日志轮转限制
-# 编辑 docker-compose.yaml, 减小 max-size
+# 3. Reduce log rotation limits
+# Edit docker-compose.yaml and decrease max-size
 ```
 
-## 最佳实践
+## Best Practices
 
-### 开发环境
+### Development Environment
 ```bash
 LOG_LEVEL=DEBUG
 ```
-- 方便调试
-- 理解数据流
-- 快速定位问题
+- Easy debugging
+- Understand data flow
+- Fast issue localization
 
-### 测试环境
+### Testing Environment
 ```bash
 LOG_LEVEL=INFO
 ```
-- 监控测试执行
-- 记录关键操作
-- 平衡性能和信息量
+- Monitor test execution
+- Record key operations
+- Balance performance and info
 
-### 生产环境
+### Production Environment
 ```bash
 LOG_LEVEL=INFO
 ```
-- 最小性能影响
-- 足够的运维信息
-- 遇到问题时临时开启 DEBUG
+- Minimum performance impact
+- Sufficient operational info
+- Temporarily enable DEBUG for issues
 
-## 总结
+## Summary
 
-| 功能 | INFO | DEBUG |
+| Feature | INFO | DEBUG |
 |------|------|-------|
-| HTTP 请求日志 | ✅ | ✅ |
-| 请求参数 | ❌ | ✅ |
-| 请求 body | ❌ | ✅ (摘要) |
-| 响应数据 | ❌ | ✅ (摘要) |
-| LLM 调用详情 | ❌ | ✅ |
-| 数据库操作 | ❌ | ✅ |
-| Profile 提取过程 | ❌ | ✅ |
-| 性能影响 | < 1% | 5-10% |
-| 生产环境 | ✅ 推荐 | ⚠️ 临时使用 |
+| HTTP Request Logs | ✅ | ✅ |
+| Request Parameters | ❌ | ✅ |
+| Request Body | ❌ | ✅ (Summary) |
+| Response Data | ❌ | ✅ (Summary) |
+| LLM Call Details | ❌ | ✅ |
+| Database Operations | ❌ | ✅ |
+| Profile Extraction Process | ❌ | ✅ |
+| Performance Impact | < 1% | 5-10% |
+| Production Environment | ✅ Recommended | ⚠️ Temporary Only |
 
-**推荐配置**: 默认使用 `LOG_LEVEL=INFO`，遇到问题时临时开启 `DEBUG`。
+**Recommended Configuration**: Default to `LOG_LEVEL=INFO`, temporarily switch to `DEBUG` when issues occur.

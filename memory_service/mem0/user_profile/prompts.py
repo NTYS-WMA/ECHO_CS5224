@@ -8,20 +8,22 @@ EXTRACT_PROFILE_PROMPT = """Extract user profile from conversation. Return JSON 
 ```json
 {{
   "basic_info": {{
-    "name": "张三",
-    "current_city": "上海",
-    "school_name": "上海实验小学",
-    "grade": "三年级",
-    "class_name": "3班"
+    "name": "Alice",
+    "current_city": "Singapore",
+    "occupation": "Software Engineer",
+    "company": "Google",
+    "education_level": "master",
+    "university": "NUS",
+    "major": "Computer Science"
   }},
   "additional_profile": {{
-    "interests": [{{"name": "足球", "degree": 4, "evidence": [{{"text": "周末踢球很开心"}}]}}],
-    "skills": [{{"name": "Python", "degree": 3, "evidence": [{{"text": "写了数据工具"}}]}}],
-    "personality": [{{"name": "外向", "degree": 4, "evidence": [{{"text": "喜欢社交"}}]}}],
+    "interests": [{{"name": "hiking", "degree": 4, "evidence": [{{"text": "go hiking every weekend"}}]}}],
+    "skills": [{{"name": "Python", "degree": 3, "evidence": [{{"text": "built data tools at work"}}]}}],
+    "personality": [{{"name": "outgoing", "degree": 4, "evidence": [{{"text": "loves socializing"}}]}}],
     "social_context": {{
-      "family": {{"father": {{"name": "李明", "info": ["医生"]}}}},
-      "friends": [{{"name": "Jack", "info": ["打篮球"]}}],
-      "others": [{{"name": null, "relation": "老师", "info": ["教数学"]}}]
+      "family": {{"father": {{"name": "John", "info": ["doctor"]}}}},
+      "friends": [{{"name": "Jack", "info": ["plays basketball together"]}}],
+      "others": [{{"name": null, "relation": "uncle", "info": ["engineer"]}}]
     }},
     "learning_preferences": {{"preferred_time": "evening", "preferred_style": "visual"}}
   }}
@@ -32,101 +34,107 @@ EXTRACT_PROFILE_PROMPT = """Extract user profile from conversation. Return JSON 
 
 **1. ❗Language Consistency - MOST CRITICAL**
 - Preserve user's EXACT words - NO translation between languages
-- 中文→中文 | English→English | 混合→混合
-- ❌ "退休了"→"retired" | ✅ "退休了"→"退休了"
+- Chinese → Chinese | English → English | mixed → mixed
+- ❌ "退休了" → "retired" | ✅ "退休了" → "退休了"
 
 **2. Evidence & Degree**
 - Evidence: text only (NO timestamp - backend handles it)
 - Degree (1-5): interests=liking level, skills=proficiency, personality=strength
 - Every attribute needs evidence from conversation
 
-**3. social_context Schema**
+**3. basic_info fields**
+- name, nickname, english_name, birthday, gender, nationality, hometown, current_city, timezone, language
+- occupation (job title), company (employer), education_level (bachelor/master/PhD/etc.), university, major
+
+**4. social_context Schema**
 
 | Field | Type | Members | Rules |
 |-------|------|---------|-------|
-| **family** | object | father, mother, spouse, brother[], sister[], son[], daughter[], grandfather_*, grandmother_* | Direct relatives only. name=actual name or null (NOT relation word) |
+| **family** | object | spouse, father, mother, son[], daughter[], brother[], sister[], grandfather_*, grandmother_*, father_in_law, mother_in_law, grandson[], granddaughter[] | Direct relatives only. name=actual name or null (NOT relation word) |
 | **friends** | array | name + info | NO relation field |
 | **others** | array | name + relation + info | Collateral relatives (uncle/aunt/cousin), teachers, colleagues, etc. |
 
 **Critical**:
-- name field: actual name like "小芳" OR null (❌ NOT "妻子"/"wife")
-- Collateral relatives (uncle/aunt/cousin) → others (need "relation" to distinguish "叔叔" vs "舅舅")
+- name field: actual name like "Alice" OR null (❌ NOT "wife"/"spouse")
+- Collateral relatives (uncle/aunt/cousin) → others (use "relation" field to specify)
 - Unified format: family/friends have name+info, others have name+relation+info
 
-**4. learning_preferences** - Object (NOT array)
+**5. learning_preferences** - Object (NOT array)
 - preferred_time: "morning"/"afternoon"/"evening"
 - preferred_style: "visual"/"auditory"/"kinesthetic"
 - difficulty_level: "beginner"/"intermediate"/"advanced"
 
-**5. Extract Explicit Info Only**
+**6. Extract Explicit Info Only**
 - Don't infer or guess
 - Omit fields with no data (don't include empty keys)
 
-**6. ❗CRITICAL: Only Extract What USER Says About THEMSELVES**
+**7. ❗CRITICAL: Only Extract What USER Says About THEMSELVES**
 - **ONLY extract** information the user explicitly states about their OWN life
 - **IGNORE** AI assistant responses even if mislabeled as "user"
 - **Ignore patterns that indicate AI responses**:
-  - Questions (e.g., "你喜欢什么运动？", "What's your hobby?")
-  - Suggestions (e.g., "我建议你...", "You should try...")
-  - Explanations (e.g., "这是因为...", "This is because...")
-  - Acknowledgments (e.g., "好的，我明白了", "Got it, I understand")
+  - Questions (e.g., "What's your hobby?", "你喜欢什么运动？")
+  - Suggestions (e.g., "You should try...", "我建议你...")
+  - Explanations (e.g., "This is because...", "这是因为...")
+  - Acknowledgments (e.g., "Got it, I understand", "好的，我明白了")
   - Generic responses without personal info
 - **Extract patterns from USER**:
-  - Self-statements (e.g., "我叫李明", "I like basketball")
-  - Personal experiences (e.g., "昨天我去爬山了", "I went hiking yesterday")
-  - Personal preferences (e.g., "我喜欢晚上学习", "I prefer learning at night")
+  - Self-statements (e.g., "I'm a software engineer", "我叫李明")
+  - Personal experiences (e.g., "I went hiking yesterday", "昨天我去爬山了")
+  - Personal preferences (e.g., "I prefer learning at night", "我喜欢晚上学习")
 
 ## Examples
 
-**Ex1: Basic + Interest + Education**
-User: "我叫李明住杭州，在北京实验小学上三年级2班，最近迷上摄影，每周末拍照"
+**Ex1: Basic + Work + Education + Interest**
+User: "I'm Alice, living in Singapore. I work as a software engineer at Google. Got my master's in CS from NUS. Recently got into photography, shooting every weekend."
 ```json
 {{
   "basic_info": {{
-    "name": "李明",
-    "current_city": "杭州",
-    "school_name": "北京实验小学",
-    "grade": "三年级",
-    "class_name": "2班"
+    "name": "Alice",
+    "current_city": "Singapore",
+    "occupation": "software engineer",
+    "company": "Google",
+    "education_level": "master",
+    "university": "NUS",
+    "major": "CS"
   }},
   "additional_profile": {{
-    "interests": [{{"name": "摄影", "degree": 4, "evidence": [{{"text": "最近迷上摄影，每周末拍照"}}]}}]
+    "interests": [{{"name": "photography", "degree": 4, "evidence": [{{"text": "recently got into photography, shooting every weekend"}}]}}]
   }}
 }}
 ```
 
 **Ex2: Social Context - Complete**
-User: "我爸爸叫李明是医生，妈妈是老师。大哥叫小明在北京。我舅舅是工程师。老婆小芳是设计师，女儿小静静三岁"
+User: "My dad John is a doctor, mom is a teacher. My older brother Tom lives in New York. My uncle is an engineer. My wife Sarah is a designer, our daughter Emma just turned 3."
 ```json
 {{
   "additional_profile": {{
     "social_context": {{
       "family": {{
-        "father": {{"name": "李明", "info": ["医生"]}},
-        "mother": {{"name": null, "info": ["老师"]}},
-        "brother": [{{"name": "小明", "info": ["大哥", "在北京工作"]}}, {{"name": null, "info": ["哥哥"]}}],
-        "spouse": {{"name": "小芳", "info": ["设计师"]}},
-        "daughter": [{{"name": "小静静", "info": ["三岁"]}}]
+        "father": {{"name": "John", "info": ["doctor"]}},
+        "mother": {{"name": null, "info": ["teacher"]}},
+        "brother": [{{"name": "Tom", "info": ["older brother", "lives in New York"]}}],
+        "spouse": {{"name": "Sarah", "info": ["designer"]}},
+        "daughter": [{{"name": "Emma", "info": ["3 years old"]}}]
       }},
-      "others": [{{"name": null, "relation": "舅舅", "info": ["工程师"]}}]
+      "others": [{{"name": null, "relation": "uncle", "info": ["engineer"]}}]
     }}
   }}
 }}
 ```
-Note: brother is array (can have multiple), father/mother/spouse are objects (single). Collateral relative (舅舅) goes to others.
+Note: brother/son/daughter are arrays (can have multiple); spouse/father/mother are objects (single). Collateral relative (uncle) goes to others.
 
 **Ex3: IGNORE AI Assistant Responses** ❌
 Conversation:
-- User: "我最近在学Python"
-- Assistant: "太好了！我建议你可以从基础语法开始，然后学习数据结构。我认为Python很适合初学者。"
-- User: "好的，我会试试"
+- User: "I've been learning Python lately"
+- Assistant: "Great! I'd suggest starting with the basics, then data structures. Python is very beginner-friendly."
+- User: "Sure, I'll give it a try"
 
-Extract ONLY: {{"additional_profile": {{"skills": [{{"name": "Python", "degree": 2, "evidence": [{{"text": "我最近在学Python"}}]}}]}}}}
+Extract ONLY: {{"additional_profile": {{"skills": [{{"name": "Python", "degree": 2, "evidence": [{{"text": "I've been learning Python lately"}}]}}]}}}}
 
 **DO NOT extract**:
-- ❌ "我建议你..." (AI suggestion)
-- ❌ "我认为Python很适合初学者" (AI opinion, not user's)
-- ❌ "好的，我会试试" (no new profile info, just acknowledgment)
+- ❌ "I'd suggest..." (AI suggestion)
+- ❌ "Python is very beginner-friendly" (AI opinion, not user's)
+- ❌ "Sure, I'll give it a try" (no new profile info, just acknowledgment)
 
 ---
 Extract from: {messages}
@@ -142,14 +150,14 @@ UPDATE_PROFILE_PROMPT = """Analyze extracted info vs existing profile. Decide op
 ## Output Format
 ```json
 {{
-  "basic_info": {{"name": "张三"}},
+  "basic_info": {{"name": "Alice"}},
   "additional_profile": {{
     "interests": [
-      {{"id": "1", "event": "UPDATE", "name": "足球", "degree": 5, "evidence": [{{"text": "又赢了比赛"}}]}},
-      {{"id": null, "event": "ADD", "name": "摄影", "degree": 3, "evidence": [{{"text": "买了相机"}}]}}
+      {{"id": "1", "event": "UPDATE", "name": "football", "degree": 5, "evidence": [{{"text": "won another match"}}]}},
+      {{"id": null, "event": "ADD", "name": "photography", "degree": 3, "evidence": [{{"text": "bought a camera"}}]}}
     ],
     "personality": [
-      {{"id": "2", "event": "DELETE", "name": "内向"}}
+      {{"id": "2", "event": "DELETE", "name": "introverted"}}
     ]
   }}
 }}
@@ -164,8 +172,8 @@ UPDATE_PROFILE_PROMPT = """Analyze extracted info vs existing profile. Decide op
 **3. ID Mapping** - Use existing ID for UPDATE/DELETE, null for ADD
 
 **4. Evidence Analysis for Contradictions**
-- Strong recent evidence (10+ entries, <3mo) + user says "不喜欢了" → reduce degree (temp mood)
-- Weak/old evidence (1-2 entries or >6mo) + user says "不喜欢了" → DELETE (real change)
+- Strong recent evidence (10+ entries, <3mo) + user says they no longer like it → reduce degree (temp mood)
+- Weak/old evidence (1-2 entries or >6mo) + user says they no longer like it → DELETE (real change)
 
 **5. Degree** - Combine new + existing evidence to determine
 
@@ -176,27 +184,27 @@ UPDATE_PROFILE_PROMPT = """Analyze extracted info vs existing profile. Decide op
 **8. ❗social_context - DEEP MERGE**
 - Return ONLY mentioned relationships with events (ADD/UPDATE/DELETE)
 - Backend preserves unmentioned relationships
-- Example: To add spouse, return `{{"family": {{"spouse": {{"event": "ADD", "name": "小芳", "info": [...]}}}}}}`
+- Example: To add spouse, return `{{"family": {{"spouse": {{"event": "ADD", "name": "Sarah", "info": [...]}}}}}}`
 - Backend will merge with existing father/mother (DON'T return them)
 
 **9. ❗Personality Conflict Detection**
 
 Before adding/updating personality, check semantic conflicts:
 
-**Conflicts**: "粗枝大叶/粗心" ↔ "细心/认真负责" | "内向" ↔ "外向" | "悲观" ↔ "乐观"
+**Conflicts**: "careless/sloppy" ↔ "careful/responsible" | "introverted" ↔ "extroverted" | "pessimistic" ↔ "optimistic"
 
 **Resolution**:
 a) **Insufficient evidence** (1-2 new vs 4+ existing) → SKIP
-   Ex: 1 criticism "粗枝大叶" vs "认真负责"(degree 4, 4 evidence) → SKIP
+   Ex: 1 criticism "careless" vs "responsible"(degree 4, 4 evidence) → SKIP
 
 b) **Moderate conflict** (3-4 new evidence) → UPDATE reduce degree
-   Ex: 3 "粗心" evidence → UPDATE "认真负责" from degree 5 to 3
+   Ex: 3 "careless" evidence → UPDATE "responsible" from degree 5 to 3
 
 c) **Real change** (5+ new recent vs old existing) → DELETE old + ADD new
-   Ex: 6 recent "外向" evidence vs "内向"(1yr ago) → DELETE "内向", ADD "外向"
+   Ex: 6 recent "extroverted" evidence vs "introverted"(1yr ago) → DELETE "introverted", ADD "extroverted"
 
 d) **❗Complex coexistence** (RARE - both have 5+ evidence + clear context)
-   Ex: "内向"(5 work evidence) + "外向"(5 family evidence) → Both valid
+   Ex: "introverted"(5 work evidence) + "extroverted"(5 family evidence) → Both valid
    ❌ Most conflicts should use a/b/c - coexistence is RARE
 
 **Degree Reasonableness**:
@@ -206,46 +214,46 @@ d) **❗Complex coexistence** (RARE - both have 5+ evidence + clear context)
 ## Examples
 
 **Ex1: ADD**
-User: "开始喜欢爬山了" | Existing: No "爬山"
+User: "started enjoying hiking" | Existing: No "hiking"
 ```json
-{{"additional_profile": {{"interests": [{{"id": null, "event": "ADD", "name": "爬山", "degree": 3, "evidence": [{{"text": "开始喜欢爬山了"}}]}}]}}}}
+{{"additional_profile": {{"interests": [{{"id": null, "event": "ADD", "name": "hiking", "degree": 3, "evidence": [{{"text": "started enjoying hiking"}}]}}]}}}}
 ```
 
 **Ex2: UPDATE degree**
-User: "现在是Python专家了" | Existing: {{"id": "5", "name": "Python", "degree": 3}}
+User: "I'm a Python expert now" | Existing: {{"id": "5", "name": "Python", "degree": 3}}
 ```json
-{{"additional_profile": {{"skills": [{{"id": "5", "event": "UPDATE", "name": "Python", "degree": 5, "evidence": [{{"text": "现在是Python专家了"}}]}}]}}}}
+{{"additional_profile": {{"skills": [{{"id": "5", "event": "UPDATE", "name": "Python", "degree": 5, "evidence": [{{"text": "I'm a Python expert now"}}]}}]}}}}
 ```
 
 **Ex3: DELETE (real change)**
-User: "不喜欢足球了" | Existing: {{"id": "1", "name": "足球", "degree": 4, "evidence": [10 entries, 8mo ago]}}
+User: "I don't like football anymore" | Existing: {{"id": "1", "name": "football", "degree": 4, "evidence": [10 entries, 8mo ago]}}
 Analysis: Old evidence → Real change
 ```json
-{{"additional_profile": {{"interests": [{{"id": "1", "event": "DELETE", "name": "足球"}}]}}}}
+{{"additional_profile": {{"interests": [{{"id": "1", "event": "DELETE", "name": "football"}}]}}}}
 ```
 
 **Ex4: Personality Conflict - SKIP insufficient evidence**
-User: "今天被批评粗枝大叶" | Existing: {{"id": "1", "name": "认真负责", "degree": 4, "evidence": [4 entries]}}
-Analysis: 1 criticism vs 4 strong evidence → SKIP
+User: "got criticized for being careless today" | Existing: {{"id": "1", "name": "responsible", "degree": 4, "evidence": [4 entries]}}
+Analysis: 1 incident vs 4 strong evidence → SKIP
 ```json
 {{"additional_profile": {{}}}}
 ```
 
 **Ex5: Personality Conflict - Real change**
-User: "我变得很外向了，常主动社交" + 5 more | Existing: {{"id": "3", "name": "内向", "degree": 4, "evidence": [3 entries, 10mo ago]}}
+User: "I've become very outgoing, always initiating social activities" + 5 more | Existing: {{"id": "3", "name": "introverted", "degree": 4, "evidence": [3 entries, 10mo ago]}}
 Analysis: 6 recent vs 3 old → DELETE old, ADD new
 ```json
 {{
   "additional_profile": {{
     "personality": [
-      {{"id": "3", "event": "DELETE", "name": "内向"}},
-      {{"id": null, "event": "ADD", "name": "外向", "degree": 4, "evidence": [
-        {{"text": "我变得很外向了，常主动社交"}},
-        {{"text": "周末参加了三场聚会"}},
-        {{"text": "主动组织团队活动"}},
-        {{"text": "认识了很多新朋友"}},
-        {{"text": "享受社交带来的快乐"}},
-        {{"text": "同事说我判若两人"}}
+      {{"id": "3", "event": "DELETE", "name": "introverted"}},
+      {{"id": null, "event": "ADD", "name": "extroverted", "degree": 4, "evidence": [
+        {{"text": "I've become very outgoing, always initiating social activities"}},
+        {{"text": "attended three parties last weekend"}},
+        {{"text": "organized a team outing"}},
+        {{"text": "made a lot of new friends"}},
+        {{"text": "enjoy the energy from socializing"}},
+        {{"text": "colleagues said I'm like a different person"}}
       ]}}
     ]
   }}

@@ -1,92 +1,92 @@
-# UserProfile 功能开发指南
+# UserProfile Feature Development Guide
 
-> 本文档是 UserProfile 模块的完整开发指南，可直接指导开发工作。
+> This document is the complete development guide for the UserProfile module and can directly drive implementation work.
 
-**版本**: 1.0
-**创建日期**: 2025-10-04
-**适用阶段**: MVP (Minimum Viable Product)
-
----
-
-## 目录
-
-1. [项目概述](#1-项目概述)
-2. [架构设计](#2-架构设计)
-3. [数据模型](#3-数据模型)
-4. [核心 Pipeline](#4-核心-pipeline)
-5. [Prompt 设计](#5-prompt-设计)
-6. [API 设计](#6-api-设计)
-7. [错误处理](#7-错误处理)
-8. [实施步骤](#8-实施步骤)
-9. [测试用例](#9-测试用例)
-10. [部署配置](#10-部署配置)
+**Version**: 1.0
+**Created**: 2025-10-04
+**Stage**: MVP (Minimum Viable Product)
 
 ---
 
-## 1. 项目概述
+## Table of Contents
 
-### 1.1 功能描述
-
-开发一个**用户画像系统**，从对话中自动提取和管理用户的：
-- **基本信息**（姓名、生日、地理位置等）→ **非权威数据，仅供参考**
-- **兴趣爱好** → 核心价值
-- **技能** → 核心价值
-- **性格特征** → 核心价值
-- **社交关系** → 核心价值
-- **学习偏好** → 核心价值
-
-为 AI 对话提供丰富的用户上下文。
-
-**重要架构说明**：
-- `basic_info`：从对话中提取的基本信息，**非权威数据**，仅用于参考、对比、个性化
-- `additional_profile`：兴趣、技能、性格等深度特征，**核心价值所在**
-- 主服务维护权威的用户基本信息，详见 `discuss/19-manual_data_decision.md`
-
-### 1.2 核心设计理念
-
-**Evidence-Based（基于证据）**：
-- 每个判断都有证据支撑
-- 证据包含文本描述和时间戳
-- LLM 可综合分析证据做出智能决策
-
-### 1.3 暂不实现的功能
-
-- **词汇管理**（vocab）：归档到 `archived/vocab_design.md`
-- 理由：逻辑需要与产品进一步讨论
-- 处理：预留接口，返回 501 Not Implemented
+1. [Project Overview](#1-project-overview)
+2. [Architecture Design](#2-architecture-design)
+3. [Data Model](#3-data-model)
+4. [Core Pipeline](#4-core-pipeline)
+5. [Prompt Design](#5-prompt-design)
+6. [API Design](#6-api-design)
+7. [Error Handling](#7-error-handling)
+8. [Implementation Steps](#8-implementation-steps)
+9. [Test Cases](#9-test-cases)
+10. [Deployment Configuration](#10-deployment-configuration)
 
 ---
 
-## 2. 架构设计
+## 1. Project Overview
 
-### 2.1 模块结构
+### 1.1 Feature Description
+
+Develop a **user profile system** that automatically extracts and manages the following from conversations:
+- **Basic info** (name, birthday, location, etc.) → **Non-authoritative data, for reference only**
+- **Interests** → Core value
+- **Skills** → Core value
+- **Personality traits** → Core value
+- **Social relationships** → Core value
+- **Learning preferences** → Core value
+
+Provides rich user context for AI conversations.
+
+**Important architectural notes**:
+- `basic_info`: Basic information extracted from conversations. **Non-authoritative data**, used only for reference, comparison, and personalization.
+- `additional_profile`: Deep characteristics such as interests, skills, and personality. **This is the core value.**
+- The main service maintains authoritative user basic info. See `discuss/19-manual_data_decision.md`.
+
+### 1.2 Core Design Philosophy
+
+**Evidence-Based**:
+- Every judgment is backed by evidence.
+- Evidence contains a text description and a timestamp.
+- The LLM can synthesize evidence to make intelligent decisions.
+
+### 1.3 Features Not Yet Implemented
+
+- **Vocabulary management** (vocab): Archived to `archived/vocab_design.md`.
+- Reason: Logic requires further product discussion.
+- Handling: Interface reserved; returns 501 Not Implemented.
+
+---
+
+## 2. Architecture Design
+
+### 2.1 Module Structure
 
 ```
 mem0/
-├── memory/                 # 现有：记忆模块
+├── memory/                 # Existing: memory module
 │   └── ...
-├── user_profile/           # 新增：用户画像模块
-│   ├── __init__.py         # 暴露 UserProfile 类
-│   ├── main.py             # UserProfile 主类
-│   ├── profile_manager.py  # Profile 业务逻辑
-│   ├── vocab_manager.py    # Vocab 业务逻辑（预留，返回 Not Implemented）
-│   ├── prompts.py          # Prompt 模板
-│   ├── models.py           # Pydantic 数据模型
+├── user_profile/           # New: user profile module
+│   ├── __init__.py         # Exposes UserProfile class
+│   ├── main.py             # UserProfile main class
+│   ├── profile_manager.py  # Profile business logic
+│   ├── vocab_manager.py    # Vocab business logic (reserved, returns Not Implemented)
+│   ├── prompts.py          # Prompt templates
+│   ├── models.py           # Pydantic data models
 │   ├── database/
 │   │   ├── __init__.py
-│   │   ├── postgres.py     # PostgreSQL 操作封装
-│   │   └── mongodb.py      # MongoDB 操作封装
-│   └── utils.py            # 工具函数
-├── llms/                   # 现有：LLM 提供商
-├── embeddings/             # 现有：Embedding 提供商
+│   │   ├── postgres.py     # PostgreSQL operations wrapper
+│   │   └── mongodb.py      # MongoDB operations wrapper
+│   └── utils.py            # Utility functions
+├── llms/                   # Existing: LLM providers
+├── embeddings/             # Existing: Embedding providers
 └── ...
 
 server/
-├── main.py                 # FastAPI 服务（修改）
+├── main.py                 # FastAPI service (modified)
 └── ...
 ```
 
-### 2.2 组件关系
+### 2.2 Component Relationships
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -108,49 +108,49 @@ server/
           ▼                  ▼                  ▼
 ┌──────────────────┐ ┌─────────────────┐ ┌─────────────────┐
 │  ProfileManager  │ │ PostgresManager │ │ MongoDBManager  │
-│  (业务逻辑)       │ │ (数据访问)       │ │ (数据访问)       │
+│  (Business Logic)│ │ (Data Access)   │ │ (Data Access)   │
 └──────────────────┘ └─────────────────┘ └─────────────────┘
           │
           ▼
 ┌──────────────────────────────────────────────────┐
-│             LLM (复用 mem0 的 LLM)                │
+│             LLM (reuses mem0's LLM)              │
 │  - DeepSeek (provider: deepseek)                 │
 └──────────────────────────────────────────────────┘
 ```
 
-### 2.3 数据流
+### 2.3 Data Flow
 
 ```
-1. 用户对话 (messages)
+1. User conversation (messages)
    ↓
-2. FastAPI 接收 POST /profile
+2. FastAPI receives POST /profile
    ↓
 3. UserProfile.set_profile()
    ↓
 4. ProfileManager.set_profile()
-   ├─ 阶段 1: LLM 提取信息 + evidence
-   ├─ 查询现有数据 (PostgreSQL + MongoDB)
-   ├─ 阶段 2: LLM 判断更新操作 (ADD/UPDATE/DELETE)
-   └─ 执行数据库操作
+   ├─ Stage 1: LLM extracts info + evidence
+   ├─ Query existing data (PostgreSQL + MongoDB)
+   ├─ Stage 2: LLM decides update operations (ADD/UPDATE/DELETE)
+   └─ Execute database operations
    ↓
-5. 返回结果给 FastAPI
+5. Return result to FastAPI
    ↓
-6. 返回 JSON 响应给客户端
+6. Return JSON response to client
 ```
 
 ---
 
-## 3. 数据模型
+## 3. Data Model
 
-### 3.1 PostgreSQL: user_profile 表
+### 3.1 PostgreSQL: user_profile Table
 
-**用途**：存储从对话中提取的基本信息（**非权威数据，仅供参考**）
+**Purpose**: Stores basic information extracted from conversations (**non-authoritative data, for reference only**)
 
-**重要说明**：
-- 此表存储的是从对话中LLM提取的基本信息
-- **非权威数据源**，仅用于参考、对比、发现信息变更
-- 主服务维护权威的用户基本信息
-- 详见架构决策文档：`discuss/19-manual_data_decision.md`
+**Important notes**:
+- This table stores basic info extracted from conversations by the LLM.
+- **Not an authoritative data source.** Used only for reference, comparison, and detecting information changes.
+- The main service maintains authoritative user basic information.
+- See architecture decision document: `discuss/19-manual_data_decision.md`
 
 ```sql
 CREATE SCHEMA IF NOT EXISTS user_profile;
@@ -160,31 +160,33 @@ CREATE TABLE user_profile.user_profile (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    -- 基本信息（从对话中提取，非权威）
+    -- Basic info (extracted from conversation, non-authoritative)
     name VARCHAR(100),
     nickname VARCHAR(100),
     english_name VARCHAR(100),
     birthday DATE,
     gender VARCHAR(10),
 
-    -- 地理和文化
+    -- Geographic and cultural
     nationality VARCHAR(50),
     hometown VARCHAR(100),
     current_city VARCHAR(100),
     timezone VARCHAR(50),
     language VARCHAR(50),
 
-    -- 教育信息（适用于儿童用户，3-9岁）
-    school_name VARCHAR(200),
-    grade VARCHAR(50),
-    class_name VARCHAR(50),
+    -- Professional and educational info (for adult users, ages 14-40)
+    occupation VARCHAR(100),
+    company VARCHAR(200),
+    education_level VARCHAR(50),
+    university VARCHAR(200),
+    major VARCHAR(100),
 
-    -- 索引
+    -- Indexes
     INDEX idx_user_id (user_id),
     INDEX idx_created_at (created_at)
 );
 
--- 自动更新 updated_at
+-- Auto-update updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -199,116 +201,110 @@ CREATE TRIGGER update_user_profile_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 ```
 
-**字段说明**：
+**Field descriptions**:
 
-| 字段 | 类型 | 说明 | 示例 |
-|------|------|------|------|
-| user_id | VARCHAR(50) | 用户唯一标识 | "u123" |
-| name | VARCHAR(100) | 真实姓名 | "爱丽丝" |
-| nickname | VARCHAR(100) | 昵称 | "小艾" |
-| english_name | VARCHAR(100) | 英文名 | "Alice" |
-| birthday | DATE | 生日 | "2018-07-15" |
-| gender | VARCHAR(10) | 性别 | "F" / "M" / "Other" |
-| nationality | VARCHAR(50) | 国籍 | "China" |
-| hometown | VARCHAR(100) | 家乡 | "Nanjing" |
-| current_city | VARCHAR(100) | 当前城市 | "Beijing" |
-| timezone | VARCHAR(50) | 时区 | "Asia/Shanghai" |
-| language | VARCHAR(50) | 主要语言 | "Chinese" |
-| school_name | VARCHAR(200) | 学校名称（儿童用户） | "北京实验小学" |
-| grade | VARCHAR(50) | 年级（支持中英文） | "三年级" / "Grade 3" |
-| class_name | VARCHAR(50) | 班级（可选） | "3班" / "Class 3A" |
+| Field | Type | Description | Example |
+|-------|------|-------------|---------|
+| user_id | VARCHAR(50) | Unique user identifier | "u123" |
+| name | VARCHAR(100) | Full name | "Alice" |
+| nickname | VARCHAR(100) | Nickname | "Ali" |
+| english_name | VARCHAR(100) | English name | "Alice" |
+| birthday | DATE | Date of birth | "1995-07-15" |
+| gender | VARCHAR(10) | Gender | "F" / "M" / "Other" |
+| nationality | VARCHAR(50) | Nationality | "US" |
+| hometown | VARCHAR(100) | Hometown | "Chicago" |
+| current_city | VARCHAR(100) | Current city | "New York" |
+| timezone | VARCHAR(50) | Timezone | "America/New_York" |
+| language | VARCHAR(50) | Primary language | "English" |
+| occupation | VARCHAR(100) | Occupation (adult users) | "Software Engineer" |
+| company | VARCHAR(200) | Employer (adult users) | "Acme Corp" |
+| education_level | VARCHAR(50) | Education level (adult users) | "Bachelor's" / "Master's" |
+| university | VARCHAR(200) | University attended (adult users) | "MIT" |
+| major | VARCHAR(100) | Field of study (adult users) | "Computer Science" |
 
 ---
 
-### 3.2 MongoDB: user_additional_profile 集合
+### 3.2 MongoDB: user_additional_profile Collection
 
-**用途**：存储用户扩展信息（灵活、可扩展）
+**Purpose**: Stores extended user information (flexible, extensible)
 
 ```javascript
 {
     "_id": ObjectId("..."),
     "user_id": "u123",
 
-    // 兴趣（允许与 skills 重叠）
+    // interests (overlap with skills is allowed)
     "interests": [
         {
             "id": "0",
-            "name": "足球",
-            "degree": 4,  // 1-5: 喜好程度
+            "name": "football",
+            "degree": 4,  // 1-5: level of interest
             "evidence": [
                 {
-                    "text": "和朋友踢足球很开心",
+                    "text": "Had a great time playing football with friends",
                     "timestamp": "2025-10-01T10:30:00"
                 },
                 {
-                    "text": "周末又赢了一场",
+                    "text": "Won another match over the weekend",
                     "timestamp": "2025-10-08T15:20:00"
                 }
             ]
         }
     ],
 
-    // 技能（允许与 interests 重叠）
+    // skills (overlap with interests is allowed)
     "skills": [
         {
             "id": "0",
             "name": "python",
-            "degree": 2,  // 1-5: 掌握程度
+            "degree": 2,  // 1-5: proficiency level
             "evidence": [
                 {
-                    "text": "学了 Python 的 for 循环",
+                    "text": "Learned Python for loops",
                     "timestamp": "2025-09-20T14:00:00"
                 }
             ]
         }
     ],
 
-    // 性格
+    // personality
     "personality": [
         {
             "id": "0",
-            "name": "好奇",
-            "degree": 4,  // 1-5: 明显程度
+            "name": "curious",
+            "degree": 4,  // 1-5: prominence of the trait
             "evidence": [
                 {
-                    "text": "主动问了很多问题",
+                    "text": "Proactively asked many questions",
                     "timestamp": "2025-10-01T10:00:00"
                 }
             ]
         }
     ],
 
-    // 社交关系（使用深度合并策略，保留所有现有关系）
+    // social relationships (uses deep-merge strategy, preserving all existing relations)
     "social_context": {
-        // family: 直系亲属 ONLY（单个对象或数组）
+        // family: immediate relatives ONLY (single object or array)
         "family": {
-            // 核心关系（单个对象）
+            // Core relations (single object)
+            "spouse": {
+                "name": "Jane",  // Specific name; null if not mentioned (❌ do NOT fill with "spouse")
+                "info": ["designer", "married 3 years"]
+            },
             "father": {
-                "name": "John",  // 具体名字，未提及则为 null（❌ 不要用 "father" 填充）
+                "name": "John",
                 "info": ["doctor", "kind and loving", "plays football"]
             },
             "mother": {
-                "name": null,  // 名字未提及
+                "name": null,  // Name not mentioned
                 "info": ["teacher", "strict", "cooks delicious meals"]
             },
 
-            // 配偶（单个对象）
-            "spouse": {
-                "name": "小芳",
-                "info": ["designer", "married 7 years"]
-            },
-
-            // 祖辈（单个对象）
-            "grandfather_paternal": {
-                "name": null,
-                "info": ["retired", "lives in hometown"]
-            },
-
-            // 兄弟姐妹（数组，可多个）
+            // Common relations (arrays, multiple allowed)
             "brother": [
                 {
                     "name": "Tom",
-                    "info": ["older brother", "engineer", "lives in Beijing"]
+                    "info": ["older brother", "engineer", "lives in Chicago"]
                 }
             ],
             "sister": [
@@ -318,46 +314,58 @@ CREATE TRIGGER update_user_profile_updated_at
                 }
             ],
 
-            // 子女（数组，可多个）
+            // Grandparents (single objects)
+            "grandfather_paternal": {
+                "name": null,
+                "info": ["retired", "lives in hometown"]
+            },
+
+            // Children (arrays, multiple allowed)
+            "son": [
+                {
+                    "name": "Max",
+                    "info": ["five years old", "loves drawing"]
+                }
+            ],
             "daughter": [
                 {
-                    "name": "小静静",
-                    "info": ["three years old", "very cute"]
+                    "name": null,
+                    "info": ["two years old", "very active"]
                 }
             ]
 
-            // 允许的 family 关系（详见 mem0/user_profile/user_profile_schema.py）：
-            // - Core: father, mother
+            // Allowed family relations (see mem0/user_profile/user_profile_schema.py):
+            // - Core: spouse, father, mother, son, daughter
             // - Common: brother, sister, grandfather_paternal, grandmother_paternal,
             //           grandfather_maternal, grandmother_maternal
-            // - Extended: spouse, son, daughter, grandson, granddaughter
+            // - Extended: grandson, granddaughter, father_in_law, mother_in_law
             //
-            // ❗ 旁系亲属（uncle/aunt/cousin）放到 "others"，不在 family
+            // ❗ Collateral relatives (uncle/aunt/cousin) go into "others", NOT family
         },
 
-        // friends: 朋友关系（数组）
+        // friends: friend relationships (array)
         "friends": [
             {
                 "name": "Amy",
-                "info": ["classmate", "plays football"]
+                "info": ["colleague", "plays football"]
             },
             {
-                "name": null,  // 名字未提及
-                "info": ["good friend", "likes movies"]
+                "name": null,  // Name not mentioned
+                "info": ["close friend", "likes movies"]
             }
         ],
 
-        // others: 其他社交关系（旁系亲属、同事、老师、邻居等）
+        // others: other social relationships (collateral relatives, colleagues, teachers, neighbors, etc.)
         "others": [
             {
                 "name": null,
-                "relation": "uncle",  // 叔叔/舅舅/姑父等
+                "relation": "uncle",
                 "info": ["engineer", "very kind"]
             },
             {
-                "name": "李老师",
-                "relation": "teacher",
-                "info": ["teaches math", "very patient"]
+                "name": "Dr. Smith",
+                "relation": "mentor",
+                "info": ["teaches machine learning", "very patient"]
             },
             {
                 "name": null,
@@ -367,14 +375,14 @@ CREATE TRIGGER update_user_profile_updated_at
         ]
     },
 
-    // 学习偏好
+    // learning preferences
     "learning_preferences": {
-        "preferred_time": "evening",      // "morning" / "afternoon" / "evening"
-        "preferred_style": "visual",      // "visual" / "auditory" / "kinesthetic"
+        "preferred_time": "evening",       // "morning" / "afternoon" / "evening"
+        "preferred_style": "visual",       // "visual" / "auditory" / "kinesthetic"
         "difficulty_level": "intermediate" // "beginner" / "intermediate" / "advanced"
     },
 
-    // 系统元数据
+    // system metadata
     "system_metadata": {
         "created_at": "2025-10-01T00:00:00",
         "updated_at": "2025-10-03T12:30:00",
@@ -383,7 +391,7 @@ CREATE TRIGGER update_user_profile_updated_at
 }
 ```
 
-**MongoDB 索引**：
+**MongoDB Indexes**:
 ```javascript
 db.user_additional_profile.createIndex({ "user_id": 1 }, { unique: true });
 db.user_additional_profile.createIndex({ "interests.name": 1 });
@@ -391,120 +399,115 @@ db.user_additional_profile.createIndex({ "skills.name": 1 });
 db.user_additional_profile.createIndex({ "personality.name": 1 });
 ```
 
-**统一字段结构** (interests / skills / personality)：
+**Unified field structure** (interests / skills / personality):
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | string | 唯一标识（UUID） |
-| name | string | 名称 |
-| degree | int (1-5) | 程度（兴趣=喜好程度，技能=掌握程度，性格=明显程度） |
-| evidence | array | 证据列表 |
-| evidence[].text | string | 证据描述（简短，1-2句话） |
-| evidence[].timestamp | ISO8601 | 时间戳 |
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Unique identifier (UUID) |
+| name | string | Item name |
+| degree | int (1-5) | Level (interests=preference, skills=proficiency, personality=prominence) |
+| evidence | array | List of evidence entries |
+| evidence[].text | string | Evidence description (brief, 1-2 sentences) |
+| evidence[].timestamp | ISO8601 | Timestamp |
 
-**social_context 字段说明**：
+**social_context field descriptions**:
 
-| 字段 | 类型 | 说明 | 示例 |
-|------|------|------|------|
-| **family** | object | 直系亲属（immediate relatives ONLY） | - |
-| family.father | object | 父亲（单个） | `{"name": "李明", "info": ["engineer"]}` |
-| family.mother | object | 母亲（单个） | `{"name": null, "info": ["teacher"]}` |
-| family.spouse | object | 配偶（单个） | `{"name": "小芳", "info": ["designer"]}` |
-| family.brother | array | 兄弟（可多个） | `[{"name": "Tom", "info": ["older"]}]` |
-| family.sister | array | 姐妹（可多个） | `[{"name": null, "info": ["younger"]}]` |
-| family.son | array | 儿子（可多个） | - |
-| family.daughter | array | 女儿（可多个） | - |
-| family.grandfather_* | object | 祖父（paternal/maternal） | - |
-| family.grandmother_* | object | 祖母（paternal/maternal） | - |
-| **friends** | array | 朋友列表 | - |
-| friends[].name | string\|null | 名字（未提及则 null） | "Amy" 或 null |
-| friends[].info | array<string> | 相关信息 | `["classmate", "kind"]` |
-| **others** | array | 其他社交关系（旁系亲属、同事等） | - |
-| others[].name | string\|null | 名字（未提及则 null） | "李老师" 或 null |
-| others[].relation | string | 关系类型（**必需**） | "uncle", "teacher", "colleague" |
-| others[].info | array<string> | 相关信息 | `["engineer", "kind"]` |
+| Field | Type | Description | Example |
+|-------|------|-------------|---------|
+| **family** | object | Immediate relatives ONLY | - |
+| family.spouse | object | Spouse (single) | `{"name": "Jane", "info": ["designer"]}` |
+| family.father | object | Father (single) | `{"name": "John", "info": ["engineer"]}` |
+| family.mother | object | Mother (single) | `{"name": null, "info": ["teacher"]}` |
+| family.son | array | Son(s) (multiple allowed) | `[{"name": "Max", "info": ["five years old"]}]` |
+| family.daughter | array | Daughter(s) (multiple allowed) | - |
+| family.brother | array | Brother(s) (multiple allowed) | `[{"name": "Tom", "info": ["older"]}]` |
+| family.sister | array | Sister(s) (multiple allowed) | `[{"name": null, "info": ["younger"]}]` |
+| family.grandfather_* | object | Grandfather (paternal/maternal) | - |
+| family.grandmother_* | object | Grandmother (paternal/maternal) | - |
+| **friends** | array | Friends list | - |
+| friends[].name | string\|null | Name (null if not mentioned) | "Amy" or null |
+| friends[].info | array<string> | Related information | `["colleague", "kind"]` |
+| **others** | array | Other social relationships (collateral relatives, colleagues, etc.) | - |
+| others[].name | string\|null | Name (null if not mentioned) | "Dr. Smith" or null |
+| others[].relation | string | Relationship type (**required**) | "uncle", "mentor", "colleague" |
+| others[].info | array<string> | Related information | `["engineer", "kind"]` |
 
-**重要设计说明**：
+**Important design notes**:
 
-1. **name 字段规则**：
-   - ✅ 只填具体名字（如 "小芳"、"李明"）
-   - ✅ 未提及则设为 `null`
-   - ❌ **不要**用关系词填充（如 "妻子"、"父亲"）
+1. **name field rules**:
+   - ✅ Only fill with a specific name (e.g., "Jane", "John")
+   - ✅ Set to `null` if not mentioned
+   - ❌ **Do NOT** fill with a relationship label (e.g., "wife", "father")
 
-2. **family 关系分类**（基于当前用户画像：小孩）：
-   - **Core**: father, mother
+2. **family relation categories** (based on current user persona: adult):
+   - **Core**: spouse, father, mother, son, daughter
    - **Common**: brother, sister, grandfather_paternal, grandmother_paternal, grandfather_maternal, grandmother_maternal
-   - **Extended**: spouse, son, daughter, grandson, granddaughter
+   - **Extended**: grandson, granddaughter, father_in_law, mother_in_law
 
-3. **旁系亲属处理**：
-   - ❌ **不要**放在 family（如 uncle/aunt/cousin）
-   - ✅ 放在 **others** 中，使用 relation 字段区分（如 "叔叔" vs "舅舅" vs "姑父"）
+3. **Handling collateral relatives**:
+   - ❌ **Do NOT** place in family (e.g., uncle/aunt/cousin)
+   - ✅ Place in **others**, using the `relation` field to distinguish (e.g., "uncle" vs "aunt" vs "cousin")
 
-4. **深度合并策略**（CRITICAL）：
-   - social_context 使用**深度合并**，不是覆盖
-   - 添加新关系（如 spouse）时，**保留**现有关系（如 father/mother）
-   - 详见 `mem0/user_profile/profile_manager.py::_deep_merge_social_context()`
+4. **Deep-merge strategy** (CRITICAL):
+   - `social_context` uses **deep merge**, not replacement.
+   - When adding a new relation (e.g., son), **preserve** existing relations (e.g., spouse/father/mother).
+   - See `mem0/user_profile/profile_manager.py::_deep_merge_social_context()`
 
-5. **字段格式统一**：
-   - family 成员：`{"name": str|null, "info": [str]}`
-   - friends 成员：`{"name": str|null, "info": [str]}`
-   - others 成员：`{"name": str|null, "relation": str, "info": [str]}`
+5. **Unified field format**:
+   - family members: `{"name": str|null, "info": [str]}`
+   - friends members: `{"name": str|null, "info": [str]}`
+   - others members: `{"name": str|null, "relation": str, "info": [str]}`
 
-6. **❗Personality 冲突检测机制**（CRITICAL - 2025-10-05 新增）：
+6. **❗Personality conflict detection mechanism** (CRITICAL - added 2025-10-05):
 
-   **问题背景**：LLM 可能不检测语义冲突，导致矛盾特质并存（如："认真负责" degree=4 + "粗枝大叶" degree=4）
+   **Background**: The LLM may fail to detect semantic conflicts, leading to contradictory traits coexisting (e.g., "conscientious" degree=4 + "careless" degree=4).
 
-   **解决方案**：在 UPDATE_PROFILE_PROMPT 中添加 Rule 9 - 冲突检测和 degree 合理性验证
+   **Solution**: Add Rule 9 — conflict detection and degree validity validation — to UPDATE_PROFILE_PROMPT.
 
-   **冲突检测规则**：
+   **Conflict detection rules**:
 
-   a. **不足证据的冲突 → SKIP**
-      - 示例：现有"认真负责" (degree 4, 4 evidence)，新增1次批评"粗枝大叶"
-      - 决策：SKIP - 单次事件不足以覆盖强 evidence
+   a. **Insufficient evidence for conflict → SKIP**
+      - Example: Existing "conscientious" (degree 4, 4 evidence), new single instance of "careless".
+      - Decision: SKIP — a single event is insufficient to override strong evidence.
 
-   b. **适度冲突 → UPDATE降低degree**
-      - 示例：现有"认真负责" (degree 5)，新增3条"粗心"evidence
-      - 决策：UPDATE "认真负责" degree → 3
+   b. **Moderate conflict → UPDATE (lower degree)**
+      - Example: Existing "conscientious" (degree 5), 3 new "careless" evidence entries.
+      - Decision: UPDATE "conscientious" degree → 3.
 
-   c. **真实改变 → DELETE old + ADD new**
-      - 示例：现有"内向" (旧 evidence 1年前)，新增6条"外向" evidence (近3个月)
-      - 决策：DELETE "内向"，ADD "外向"
+   c. **Genuine change → DELETE old + ADD new**
+      - Example: Existing "introverted" (old evidence, 1 year ago), 6 new "extroverted" evidence entries (past 3 months).
+      - Decision: DELETE "introverted", ADD "extroverted".
 
-   d. **复杂人性 - 矛盾并存**（RARE，严格条件）：
-      - ✅ 允许：双方都有5+ evidence，且有明确情境区分（如工作vs家庭）
-      - ❌ 不允许：证据不足或无情境区分
-      - 示例：work context "内向" (5 evidence) + family context "外向" (5 evidence) = 合理并存
+   d. **Complex personality — coexisting contradictions** (RARE, strict conditions):
+      - ✅ Allowed: Both sides have 5+ evidence with clear contextual separation (e.g., work vs. home).
+      - ❌ Not allowed: Insufficient evidence or no contextual separation.
+      - Example: work context "introverted" (5 evidence) + family context "extroverted" (5 evidence) = valid coexistence.
 
-   **Degree 合理性规则**：
-   - degree 1-2: 1-2 evidence 足够
-   - degree 3: 需要 3-5 evidence
-   - degree 4: 需要 5-8 evidence
-   - degree 5: 需要 8+ evidence
-   - ❌ 单次事件不应产生 degree 4-5
+   **Degree validity rules**:
+   - degree 1-2: 1-2 evidence entries sufficient
+   - degree 3: requires 3-5 evidence entries
+   - degree 4: requires 5-8 evidence entries
+   - degree 5: requires 8+ evidence entries
+   - ❌ A single event should not produce degree 4-5.
 
-   **实现位置**：
-   - Prompt: `mem0/user_profile/prompts.py` - UPDATE_PROFILE_PROMPT Rule 9
-   - 测试: `test/test_personality_conflict.py` - 4个场景测试
-   - 详见: `discuss/34-personality_conflict_implemented.md`
+   **Implementation locations**:
+   - Prompt: `mem0/user_profile/prompts.py` — UPDATE_PROFILE_PROMPT Rule 9
+   - Tests: `test/test_personality_conflict.py` — 4 scenario tests
+   - See: `discuss/34-personality_conflict_implemented.md`
 
-**用户画像调整指南**：
+**User persona adjustment guide**:
 
-如果未来需要调整用户画像（从"小孩"变为"成年人"），需要修改以下文件：
+If the user persona needs to be adjusted in the future, modify the following files:
 
-1. `mem0/user_profile/user_profile_schema.py` - `FAMILY_RELATIONS` 定义
-2. `mem0/user_profile/prompts.py` - extraction prompt 中的允许关系列表和示例
-3. `DEV_GUIDE_UserProfile.md` - 本文档的 family 关系分类说明
-
-成年人用户画像的关系分类示例：
-- **Core**: spouse
-- **Common**: father, mother, son, daughter
-- **Extended**: brother, sister, grandfather_*, grandmother_*, grandson, granddaughter
+1. `mem0/user_profile/user_profile_schema.py` — `FAMILY_RELATIONS` definition
+2. `mem0/user_profile/prompts.py` — allowed relations list and examples in the extraction prompt
+3. `DEV_GUIDE_UserProfile.md` — this document's family relation category section
 
 ---
 
-## 4. 核心 Pipeline
+## 4. Core Pipeline
 
-### 4.1 set_profile 完整流程
+### 4.1 set_profile Full Flow
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -513,57 +516,59 @@ db.user_additional_profile.createIndex({ "personality.name": 1 });
                   │
                   ▼
 ┌─────────────────────────────────────────────────┐
-│  Step 1: 合并前端数据和 LLM 提取（basic_info）   │
-│  - 如果 manual_data 有值，优先使用              │
-│  - 否则调用 LLM 提取 basic_info                 │
+│  Step 1: Merge frontend data and LLM extraction │
+│  (basic_info)                                   │
+│  - If manual_data is provided, use it first     │
+│  - Otherwise, call LLM to extract basic_info    │
 └─────────────────┬───────────────────────────────┘
                   │
                   ▼
 ┌─────────────────────────────────────────────────┐
-│  Step 2: LLM 提取扩展信息（阶段 1）              │
-│  - 提取 interests, skills, personality          │
-│  - 每项包含 name 和 evidence                    │
-│  - 返回 JSON 格式                               │
+│  Step 2: LLM extracts extended info (Stage 1)   │
+│  - Extracts interests, skills, personality      │
+│  - Each item includes name and evidence         │
+│  - Returns JSON format                          │
 └─────────────────┬───────────────────────────────┘
                   │
                   ▼
 ┌─────────────────────────────────────────────────┐
-│  Step 3: 查询现有数据                           │
+│  Step 3: Query existing data                    │
 │  - PostgreSQL: user_profile (basic_info)        │
-│  - MongoDB: user_additional_profile (全部)      │
+│  - MongoDB: user_additional_profile (all)       │
 └─────────────────┬───────────────────────────────┘
                   │
                   ▼
 ┌─────────────────────────────────────────────────┐
-│  Step 4: basic_info 直接 UPSERT                 │
-│  - 不需要 LLM 判断                              │
-│  - 有值就更新，无值就保持                       │
+│  Step 4: Direct UPSERT for basic_info           │
+│  - No LLM judgment required                     │
+│  - Update if value present, keep if not         │
 └─────────────────┬───────────────────────────────┘
                   │
                   ▼
 ┌─────────────────────────────────────────────────┐
-│  Step 5: LLM 判断扩展信息更新（阶段 2）          │
-│  - Input: 现有数据 + 新提取数据                 │
-│  - Output: ADD / UPDATE / DELETE 决策           │
-│  - 包含新的 degree 和 evidence                  │
+│  Step 5: LLM decides extended info updates      │
+│  (Stage 2)                                      │
+│  - Input: existing data + newly extracted data  │
+│  - Output: ADD / UPDATE / DELETE decisions      │
+│  - Includes new degree and evidence             │
 └─────────────────┬───────────────────────────────┘
                   │
                   ▼
 ┌─────────────────────────────────────────────────┐
-│  Step 6: 执行数据库操作                         │
-│  - 逐字段容错处理                               │
-│  - 记录日志                                     │
+│  Step 6: Execute database operations            │
+│  - Per-field fault tolerance                    │
+│  - Log operations                               │
 └─────────────────┬───────────────────────────────┘
                   │
                   ▼
 ┌─────────────────────────────────────────────────┐
-│  Output: 返回更新结果                           │
-│  - basic_info: 更新了哪些字段                   │
-│  - interests/skills/personality: 各项的操作     │
+│  Output: Return update results                  │
+│  - basic_info: which fields were updated        │
+│  - interests/skills/personality: operations     │
 └─────────────────────────────────────────────────┘
 ```
 
-### 4.2 get_profile 查询流程
+### 4.2 get_profile Query Flow
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -576,91 +581,91 @@ db.user_additional_profile.createIndex({ "personality.name": 1 });
     type="basic"      type="additional"
          │                 │
          ▼                 ▼
-  查询 PostgreSQL    查询 MongoDB
+  Query PostgreSQL    Query MongoDB
          │                 │
-         │                 ├─ field="" → 返回全部
-         │                 ├─ field="interests" → 返回 interests
-         │                 └─ field="social_context.father.name" → 点语法查询
+         │                 ├─ field="" → return all
+         │                 ├─ field="interests" → return interests
+         │                 └─ field="social_context.father.name" → dot-notation query
          │                 │
          └────────┬────────┘
                   ▼
-         合并结果 (如果 type="all")
+         Merge results (if type="all")
                   │
                   ▼
-         返回 JSON 响应
+         Return JSON response
 ```
 
 ---
 
-## 5. Prompt 设计
+## 5. Prompt Design
 
-### 5.1 阶段 1：提取信息和 evidence
+### 5.1 Stage 1: Extract Information and Evidence
 
-**Prompt 模板** (`mem0/user_profile/prompts.py`):
+**Prompt template** (`mem0/user_profile/prompts.py`):
 
 ```python
-PROFILE_EXTRACTION_PROMPT = """你是一个用户画像专家，擅长从对话中提取用户的特征信息。
+PROFILE_EXTRACTION_PROMPT = """You are a user profile expert skilled at extracting user characteristics from conversations.
 
-**任务**：从对话中提取用户的兴趣、技能和性格特征，并记录相关证据。
+**Task**: Extract the user's interests, skills, and personality traits from the conversation, and record supporting evidence.
 
-**对话内容**：
+**Conversation**:
 {messages}
 
-**请返回 JSON 格式**（严格遵守格式）：
+**Return JSON format** (strictly follow this format):
 {{
     "basic_info": {{
-        "current_city": "Beijing",
-        "hometown": "Nanjing"
+        "current_city": "New York",
+        "hometown": "Chicago"
     }},
     "interests": [
         {{
-            "name": "足球",
-            "evidence": "和朋友踢足球很开心"
+            "name": "football",
+            "evidence": "Had a great time playing football with friends"
         }}
     ],
     "skills": [
         {{
             "name": "python",
-            "evidence": "学了 Python 的 for 循环"
+            "evidence": "Learned Python for loops"
         }}
     ],
     "personality": [
         {{
-            "name": "好奇",
-            "evidence": "主动问了很多问题"
+            "name": "curious",
+            "evidence": "Proactively asked many questions"
         }}
     ]
 }}
 
-**提取规则**：
-1. **basic_info**：只提取对话中明确提到的基本信息字段
-   - 可用字段：current_city, hometown, nationality, timezone, language
-   - 如果没有提及，返回空对象 {{}}
+**Extraction rules**:
+1. **basic_info**: Only extract fields explicitly mentioned in the conversation.
+   - Available fields: current_city, hometown, nationality, timezone, language
+   - If not mentioned, return empty object {{}}
 
-2. **interests**：用户喜欢、感兴趣的活动或事物
-   - name：兴趣名称（中文）
-   - evidence：具体的事实描述（1-2句话，从对话中提取）
+2. **interests**: Activities or things the user likes or is interested in.
+   - name: Name of the interest (in English)
+   - evidence: Concrete factual description (1-2 sentences, extracted from the conversation)
 
-3. **skills**：用户掌握、会做的技能或能力
-   - name：技能名称（中文）
-   - evidence：具体的事实描述
+3. **skills**: Skills or abilities the user has or can perform.
+   - name: Name of the skill (in English)
+   - evidence: Concrete factual description
 
-4. **personality**：从对话中推断的性格特征
-   - name：性格特征（中文，如"好奇"、"外向"、"耐心"）
-   - evidence：支持这个特征的行为描述
+4. **personality**: Personality traits inferred from the conversation.
+   - name: Personality trait (in English, e.g., "curious", "extroverted", "patient")
+   - evidence: Behavioral description supporting this trait
 
-**注意事项**：
-- 只提取对话中明确提到或明显体现的内容
-- 不要过度推断
-- evidence 必须是具体的事实，不要是模糊的总结
-- 如果某一类信息不存在，返回空列表 []
-- 严格按照 JSON 格式返回，不要添加额外的文字
-- 保持中文输出
+**Notes**:
+- Only extract content that is explicitly mentioned or clearly demonstrated in the conversation.
+- Do not over-infer.
+- Evidence must be specific facts, not vague summaries.
+- If a category has no information, return an empty list [].
+- Strictly return JSON format without any additional text.
+- Keep output in English.
 """
 
 def get_profile_extraction_prompt(messages: List[Dict[str, str]]) -> str:
-    """生成阶段 1 的提取 Prompt"""
-    # 格式化 messages
+    """Generate the Stage 1 extraction prompt"""
+    # Format messages
     formatted_messages = "\n".join([
         f"{msg['role']}: {msg['content']}"
         for msg in messages
@@ -671,105 +676,105 @@ def get_profile_extraction_prompt(messages: List[Dict[str, str]]) -> str:
 
 ---
 
-### 5.2 阶段 2：判断更新操作
+### 5.2 Stage 2: Decide Update Operations
 
-**Prompt 模板**：
+**Prompt template**:
 
 ```python
-PROFILE_UPDATE_DECISION_PROMPT = """你是一个用户画像管理专家，负责判断如何更新用户画像。
+PROFILE_UPDATE_DECISION_PROMPT = """You are a user profile management expert responsible for deciding how to update a user profile.
 
-**当前用户画像**：
+**Current user profile**:
 {current_profile}
 
-**从最新对话提取的信息**：
+**Information extracted from the latest conversation**:
 {extracted_info}
 
-**任务**：判断如何更新用户画像，返回 ADD / UPDATE / DELETE 决策。
+**Task**: Decide how to update the user profile, returning ADD / UPDATE / DELETE decisions.
 
-**返回 JSON 格式**（严格遵守）：
+**Return JSON format** (strictly follow):
 {{
     "interests": [
         {{
             "id": "0",
-            "name": "足球",
+            "name": "football",
             "event": "UPDATE",
             "new_degree": 4,
             "new_evidence": {{
-                "text": "和朋友踢足球很开心"
-                // 注意：不需要返回 timestamp，后端会自动添加
+                "text": "Had a great time playing football with friends"
+                // Note: timestamp is NOT required; the backend will add it automatically
             }},
-            "reason": "新增了积极的证据"
+            "reason": "Added positive evidence"
         }},
         {{
-            "name": "北京烤鸭",
+            "name": "hiking",
             "event": "ADD",
             "new_degree": 3,
             "new_evidence": {{
-                "text": "吃了北京烤鸭，很好吃"
-                // 注意：不需要返回 timestamp，后端会自动添加
+                "text": "Went hiking over the weekend and loved it"
+                // Note: timestamp is NOT required; the backend will add it automatically
             }},
-            "reason": "新发现的兴趣"
+            "reason": "Newly discovered interest"
         }}
     ],
     "skills": [...],
     "personality": [...]
 }}
 
-**重要说明**：
-- LLM 只需返回 evidence 的 text 字段
-- timestamp 由后端自动添加（`profile_manager.py` 的 `_add_timestamps_to_evidence()` 方法）
-- 详见 `discuss/22-prompts-implemented.md`
+**Important notes**:
+- The LLM only needs to return the evidence `text` field.
+- The `timestamp` is added automatically by the backend (`profile_manager.py::_add_timestamps_to_evidence()`).
+- See `discuss/22-prompts-implemented.md` for details.
 
-**判断规则**：
+**Decision rules**:
 
-1. **ADD（新增）**：
-   - 名称在当前画像中不存在
-   - 生成新 ID（由程序处理，不需要返回）
-   - 初始 degree：根据 evidence 质量判断（通常 2-3）
+1. **ADD (new entry)**:
+   - Name does not exist in the current profile.
+   - A new ID will be generated by the application (not required in the response).
+   - Initial degree: judged based on evidence quality (typically 2-3).
 
-2. **UPDATE（更新）**：
-   - 名称已存在
-   - 必须使用原 ID
-   - 添加新 evidence
-   - 重新评估 degree（综合考虑所有 evidence）
+2. **UPDATE (update existing)**:
+   - Name already exists.
+   - Must use the original ID.
+   - Append new evidence.
+   - Re-evaluate degree (considering all evidence).
 
-3. **DELETE（删除）**：
-   - 新对话明确表示不再喜欢/不会/不具备该特征
-   - 综合考虑：
-     * 旧 evidence 数量：多 → 谨慎删除
-     * 旧 evidence 时间：近期 → 可能是临时情绪，降 degree 而不删除
-     * 旧 evidence 时间：久远 → 可能真的改变了，可以删除
+3. **DELETE (remove entry)**:
+   - New conversation explicitly states the user no longer likes/has/exhibits the characteristic.
+   - Consider:
+     * Volume of old evidence: high → delete cautiously
+     * Recency of old evidence: recent → may be a temporary mood, lower degree instead
+     * Recency of old evidence: old → may be a genuine change, deletion is appropriate
 
-4. **degree 评估**（1-5）：
-   - 兴趣：1=不太喜欢, 2=一般, 3=喜欢, 4=很喜欢, 5=最爱
-   - 技能：1=初学, 2=入门, 3=中级, 4=高级, 5=专家
-   - 性格：1=不明显, 2=偶尔, 3=一般, 4=明显, 5=非常明显
-   - 判断依据：evidence 数量 + 质量 + 时间分布
+4. **degree evaluation** (1-5):
+   - interests: 1=slight interest, 2=moderate, 3=likes, 4=really likes, 5=passion
+   - skills: 1=beginner, 2=novice, 3=intermediate, 4=advanced, 5=expert
+   - personality: 1=barely noticeable, 2=occasional, 3=moderate, 4=prominent, 5=very prominent
+   - Basis: evidence volume + quality + temporal distribution
 
-**矛盾处理示例**：
+**Conflict handling examples**:
 
-- 场景1：旧 evidence 多(6+)且时间近(3个月内)，用户说"不喜欢了"
-  → 判断：可能是临时情绪
-  → 操作：UPDATE, new_degree = max(1, old_degree - 2)
+- Scenario 1: Many old evidence entries (6+) with recent timestamps (within 3 months), user says "I don't like it anymore"
+  → Judgment: Likely a temporary mood
+  → Action: UPDATE, new_degree = max(1, old_degree - 2)
 
-- 场景2：旧 evidence 多但时间久远(1年前)，用户说"不喜欢了"
-  → 判断：兴趣可能真的改变了
-  → 操作：DELETE
+- Scenario 2: Many old evidence entries but from long ago (1+ year), user says "I don't like it anymore"
+  → Judgment: Interest may have genuinely changed
+  → Action: DELETE
 
-- 场景3：旧 evidence 少(1-2)，用户说"不喜欢了"
-  → 判断：之前判断可能不准确
-  → 操作：DELETE
+- Scenario 3: Few old evidence entries (1-2), user says "I don't like it anymore"
+  → Judgment: Previous judgment may have been inaccurate
+  → Action: DELETE
 
-**证据时间分析**（已提供）：
+**Evidence timing analysis** (provided):
 {evidence_analysis}
 
-**当前时间**：{current_time}
+**Current time**: {current_time}
 
-**注意事项**：
-- ID 必须来自当前画像，不要生成新的 ID
-- degree 必须是 1-5 的整数
-- reason 字段简短说明判断理由
-- 严格按照 JSON 格式返回
+**Notes**:
+- IDs must come from the current profile; do not generate new ones.
+- degree must be an integer from 1-5.
+- The reason field should briefly explain the rationale.
+- Strictly return JSON format.
 """
 
 def get_profile_update_decision_prompt(
@@ -777,19 +782,19 @@ def get_profile_update_decision_prompt(
     extracted_info: Dict[str, Any],
     evidence_analysis: Optional[Dict[str, Any]] = None
 ) -> str:
-    """生成阶段 2 的更新决策 Prompt"""
+    """Generate the Stage 2 update decision prompt"""
     import json
     from datetime import datetime
 
     current_time = datetime.now().isoformat()
 
-    # 格式化当前画像（简化显示）
+    # Format current profile (simplified display)
     formatted_current = format_profile_for_prompt(current_profile)
 
-    # 格式化提取的信息
+    # Format extracted information
     formatted_extracted = json.dumps(extracted_info, ensure_ascii=False, indent=2)
 
-    # 格式化证据分析（如果提供）
+    # Format evidence analysis (if provided)
     formatted_analysis = ""
     if evidence_analysis:
         formatted_analysis = json.dumps(evidence_analysis, ensure_ascii=False, indent=2)
@@ -802,7 +807,7 @@ def get_profile_update_decision_prompt(
     )
 
 def format_profile_for_prompt(profile: Dict[str, Any]) -> str:
-    """格式化画像数据，便于 LLM 理解"""
+    """Format profile data for LLM readability"""
     lines = []
 
     for category in ["interests", "skills", "personality"]:
@@ -810,9 +815,9 @@ def format_profile_for_prompt(profile: Dict[str, Any]) -> str:
         if items:
             lines.append(f"\n{category}:")
             for item in items:
-                evidence_summary = f"{len(item.get('evidence', []))} 条证据"
+                evidence_summary = f"{len(item.get('evidence', []))} evidence entries"
                 lines.append(f"  - {item['name']} (degree={item['degree']}, {evidence_summary})")
-                # 可选：显示最近 2 条 evidence
+                # Optionally show the most recent 2 evidence entries
                 for ev in item.get('evidence', [])[:2]:
                     lines.append(f"    * \"{ev['text']}\" ({ev['timestamp'][:10]})")
 
@@ -821,11 +826,11 @@ def format_profile_for_prompt(profile: Dict[str, Any]) -> str:
 
 ---
 
-## 6. API 设计
+## 6. API Design
 
-### 6.1 POST /profile（更新用户画像）
+### 6.1 POST /profile (Update User Profile)
 
-**请求**：
+**Request**:
 
 ```http
 POST /profile HTTP/1.1
@@ -836,20 +841,20 @@ Content-Type: application/json
     "messages": [
         {
             "role": "user",
-            "content": "我昨天搬家了，新家在北京"
+            "content": "I moved yesterday, my new place is in New York"
         },
         {
             "role": "assistant",
-            "content": "恭喜你搬新家！"
+            "content": "Congratulations on the new place!"
         },
         {
             "role": "user",
-            "content": "是的，而且北京的烤鸭很好吃"
+            "content": "Yes, and the food scene here is amazing"
         }
     ],
     "manual_data": {
         "name": "Alice",
-        "birthday": "2018-07-15"
+        "birthday": "1995-07-15"
     },
     "options": {
         "update_basic": true,
@@ -861,23 +866,23 @@ Content-Type: application/json
 }
 ```
 
-**参数说明**：
+**Parameter descriptions**:
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| user_id | string | 是 | 用户ID |
-| messages | array | 是 | 对话消息列表 |
-| messages[].role | string | 是 | "user" / "assistant" |
-| messages[].content | string | 是 | 消息内容 |
-| manual_data | object | 否 | 前端手动输入的数据（优先级最高） |
-| options | object | 否 | 控制选项 |
-| options.update_basic | bool | 否 | 是否更新基本信息（默认 true） |
-| options.update_interests | bool | 否 | 是否更新兴趣（默认 true） |
-| options.update_skills | bool | 否 | 是否更新技能（默认 true） |
-| options.update_personality | bool | 否 | 是否更新性格（默认 true） |
-| options.query_all | bool | 否 | 是否查询全部数据（默认 true，false 时需提供查询字段） |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| user_id | string | Yes | User ID |
+| messages | array | Yes | List of conversation messages |
+| messages[].role | string | Yes | "user" / "assistant" |
+| messages[].content | string | Yes | Message content |
+| manual_data | object | No | Data manually entered by the frontend (highest priority) |
+| options | object | No | Control options |
+| options.update_basic | bool | No | Whether to update basic info (default true) |
+| options.update_interests | bool | No | Whether to update interests (default true) |
+| options.update_skills | bool | No | Whether to update skills (default true) |
+| options.update_personality | bool | No | Whether to update personality (default true) |
+| options.query_all | bool | No | Whether to query all data (default true; false requires specifying fields) |
 
-**响应**：
+**Response**:
 
 ```json
 {
@@ -885,14 +890,14 @@ Content-Type: application/json
         "basic_info": {
             "updated_fields": ["current_city"],
             "values": {
-                "current_city": "Beijing",
+                "current_city": "New York",
                 "name": "Alice",
-                "birthday": "2018-07-15"
+                "birthday": "1995-07-15"
             }
         },
         "interests": [
             {
-                "name": "北京烤鸭",
+                "name": "dining out",
                 "event": "ADD",
                 "degree": 3
             }
@@ -905,31 +910,31 @@ Content-Type: application/json
 
 ---
 
-### 6.2 GET /profile（获取用户画像）
+### 6.2 GET /profile (Get User Profile)
 
-**请求示例**：
+**Request examples**:
 
 ```http
-# 获取全部（evidence默认返回最新5条）
+# Get all (evidence defaults to latest 5 entries)
 GET /profile?user_id=u123
 
-# 指定fields过滤additional_profile字段
+# Filter additional_profile fields
 GET /profile?user_id=u123&fields=interests,skills
 
-# 限制evidence数量（-1表示全部）
+# Limit evidence count (-1 means all)
 GET /profile?user_id=u123&evidence_limit=10
-GET /profile?user_id=u123&evidence_limit=-1  # 返回所有evidence
+GET /profile?user_id=u123&evidence_limit=-1  # return all evidence
 ```
 
-**参数说明**：
+**Parameter descriptions**:
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| user_id | string | 是 | 用户ID |
-| fields | string | 否 | 逗号分隔的字段名，如 "interests,skills"，仅返回指定字段 |
-| evidence_limit | int | 否 | 每个条目返回的evidence数量，默认5，-1表示全部 |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| user_id | string | Yes | User ID |
+| fields | string | No | Comma-separated field names, e.g. "interests,skills"; only returns specified fields |
+| evidence_limit | int | No | Number of evidence entries per item, default 5, -1 for all |
 
-**响应示例**：
+**Response examples**:
 
 ```json
 // type=all
@@ -937,8 +942,8 @@ GET /profile?user_id=u123&evidence_limit=-1  # 返回所有evidence
     "user_id": "u123",
     "basic_info": {
         "name": "Alice",
-        "birthday": "2018-07-15",
-        "current_city": "Beijing",
+        "birthday": "1995-07-15",
+        "current_city": "New York",
         ...
     },
     "additional_profile": {
@@ -955,7 +960,7 @@ GET /profile?user_id=u123&evidence_limit=-1  # 返回所有evidence
     "interests": [
         {
             "id": "0",
-            "name": "足球",
+            "name": "football",
             "degree": 4,
             "evidence": [...]
         }
@@ -972,71 +977,71 @@ GET /profile?user_id=u123&evidence_limit=-1  # 返回所有evidence
 
 ---
 
-### 6.3 GET /profile/missing-fields（获取缺失字段）
+### 6.3 GET /profile/missing-fields (Get Missing Fields)
 
-**功能**：查询用户画像中缺失的字段，用于告知主服务在后续对话中主动询问这些信息。
+**Purpose**: Query which fields are missing from the user profile, so the main service can proactively ask for that information in subsequent conversations.
 
-**请求示例**:
+**Request examples**:
 
 ```http
-# 查询所有缺失字段
+# Query all missing fields
 GET /profile/missing-fields?user_id=u123
 
-# 只查询PostgreSQL basic_info缺失字段
+# Query only PostgreSQL basic_info missing fields
 GET /profile/missing-fields?user_id=u123&source=pg
 
-# 只查询MongoDB additional_profile缺失字段
+# Query only MongoDB additional_profile missing fields
 GET /profile/missing-fields?user_id=u123&source=mongo
 ```
 
-**参数说明**：
+**Parameter descriptions**:
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| user_id | string | 是 | 用户ID |
-| source | string | 否 | "pg" / "mongo" / "both"（默认 "both"） |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| user_id | string | Yes | User ID |
+| source | string | No | "pg" / "mongo" / "both" (default "both") |
 
-**完整字段定义**：
+**Complete field definitions**:
 
-- **PostgreSQL (basic_info)**: name, nickname, english_name, birthday, gender, nationality, hometown, current_city, timezone, language, school_name, grade, class_name
+- **PostgreSQL (basic_info)**: name, nickname, english_name, birthday, gender, nationality, hometown, current_city, timezone, language, occupation, company, education_level, university, major
 - **MongoDB (additional_profile)**: interests, skills, personality, social_context, learning_preferences
 
-**响应示例**：
+**Response example**:
 
 ```json
 {
     "user_id": "u123",
     "missing_fields": {
-        "basic_info": ["hometown", "gender", "birthday", "timezone"],
+        "basic_info": ["hometown", "gender", "birthday", "occupation"],
         "additional_profile": ["personality", "learning_preferences"]
     }
 }
 ```
 
-**应用场景**：
-主服务可以根据返回的缺失字段，在系统prompt中加入类似提示：
+**Use case**:
+The main service can use the returned missing fields to add guidance to the system prompt, such as:
 ```
-当前用户画像缺失以下信息：hometown, gender, birthday
-请在自然对话中适时询问这些信息。
+The following user profile fields are missing: hometown, gender, occupation
+Please ask for this information naturally during conversation.
 ```
 
 ---
 
-### 6.4 DELETE /profile（删除用户画像）
+### 6.4 DELETE /profile (Delete User Profile)
 
-**请求示例**:
+**Request example**:
 
 ```http
 DELETE /profile?user_id=u123
 ```
 
-**参数说明**：
+**Parameter descriptions**:
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| user_id | string | 是 | 用户ID |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| user_id | string | Yes | User ID |
 
-**响应示例**：
+**Response example**:
 
 ```json
 {
@@ -1048,95 +1053,96 @@ DELETE /profile?user_id=u123
 
 ---
 
-### 6.5 Cold Start Integration (冷启动集成)
+### 6.5 Cold Start Integration
 
-**功能概述**：
+**Feature overview**:
 
-当用户首次访问MyMem0时，如果PalServer已经存在该用户的基础画像数据（如性格标签、兴趣爱好），系统会自动从PalServer拉取并导入这些数据，避免用户重复输入。
+When a user first accesses the system, if MainService already has basic profile data for that user (e.g., personality tags, interests), the system will automatically pull and import that data, avoiding redundant input.
 
-**触发条件**：
+**Trigger conditions**:
 
-- 用户在MyMem0中不存在（basic_info和additional_profile都为空）
-- 配置了PALSERVER_BASE_URL环境变量
-- PalServer接口返回成功
+- The user does not exist in the system (both basic_info and additional_profile are empty).
+- The `MAINSERVICE_BASE_URL` environment variable is configured.
+- The MainService endpoint returns a successful response.
 
-**数据映射规则**：
+**Data mapping rules**:
 
-| PalServer字段 | MyMem0目标位置 | 映射规则 |
-|--------------|---------------|---------|
-| `childName` | `basic_info.nickname` | 直接复制 |
-| `gender` | `basic_info.gender` | `1→"male"`, `2→"female"`, 其他→`"unknown"` |
-| `age` | - | **忽略**（MyMem0只存储birthday） |
-| `personalityTraits` | `additional_profile.personality` | 逗号分隔→多个items，degree=3 |
-| `hobbies` | `additional_profile.interests` | 逗号分隔→多个items，degree=3 |
+| MainService field | Target location in MyMem0 | Mapping rule |
+|------------------|---------------------------|--------------|
+| `displayName` | `basic_info.nickname` | Direct copy |
+| `gender` | `basic_info.gender` | `1→"male"`, `2→"female"`, other→`"unknown"` |
+| `age` | - | **Ignored** (MyMem0 only stores birthday) |
+| `personalityTraits` | `additional_profile.personality` | Comma-separated → multiple items, degree=3 |
+| `hobbies` | `additional_profile.interests` | Comma-separated → multiple items, degree=3 |
 
-**配置方法**：
+**Configuration**:
 
-1. 环境变量配置（`.env`）：
+1. Environment variable (`.env`):
 ```bash
-# PalServer Configuration (for cold start)
-PALSERVER_BASE_URL=http://localhost:8099/pal
+# MainService Configuration (for cold start)
+MAINSERVICE_BASE_URL=http://localhost:8099/main
 ```
 
-2. Docker Compose配置：
+2. Docker Compose configuration:
 ```yaml
 environment:
-  - PALSERVER_BASE_URL=${PALSERVER_BASE_URL:-http://localhost:8099/pal}
+  - MAINSERVICE_BASE_URL=${MAINSERVICE_BASE_URL:-http://localhost:8099/main}
 ```
 
-**调用流程**：
+**Call flow**:
 
 ```
-用户请求 GET /profile?user_id=12345
+User requests GET /profile?user_id=12345
     ↓
-1. 查询PostgreSQL basic_info → 空
-2. 查询MongoDB additional_profile → 空
+1. Query PostgreSQL basic_info → empty
+2. Query MongoDB additional_profile → empty
     ↓
-3. 检测到用户不存在 且 配置了PALSERVER_BASE_URL
+3. User not found AND MAINSERVICE_BASE_URL is configured
     ↓
-4. 调用 PalServer: GET /pal/child/12345/summary
-   - 超时: 1秒（集群内部网络）
-   - 失败时: 记录warning，返回空profile（不阻塞）
+4. Call MainService: GET /user/12345/summary
+   (Not yet implemented; returns stub response)
+   - Timeout: 1 second (intra-cluster network)
+   - On failure: log warning, return empty profile (non-blocking)
     ↓
-5. 转换数据格式（gender映射、逗号分隔处理）
+5. Transform data (gender mapping, comma-separated parsing)
     ↓
-6. 存储到数据库：
+6. Store to database:
    - PostgreSQL: nickname, gender
    - MongoDB: personality items, interests items
    - Evidence: "Initial profile from user registration"
     ↓
-7. 重新查询并返回profile
+7. Re-query and return profile
 ```
 
-**示例**：
+**Example**:
 
-**PalServer响应**：
+**MainService response**:
 ```json
 {
   "success": true,
   "data": {
     "id": 12345,
-    "childName": "小明",
-    "age": 8,
+    "displayName": "Alex",
+    "age": 28,
     "gender": 1,
-    "personalityTraits": "开朗,善良,勇敢",
-    "hobbies": "篮球,音乐,阅读"
+    "personalityTraits": "outgoing,ambitious,creative",
+    "hobbies": "basketball,music,reading"
   }
 }
 ```
 
-**MyMem0存储结果**：
+**MyMem0 stored result**:
 ```json
 {
   "user_id": "12345",
   "basic_info": {
-    "nickname": "小明",
+    "nickname": "Alex",
     "gender": "male"
   },
   "additional_profile": {
     "personality": [
       {
-        "name": "开朗",
+        "name": "outgoing",
         "degree": 3,
         "evidence": [
           {
@@ -1145,41 +1151,41 @@ environment:
           }
         ]
       },
-      {"name": "善良", "degree": 3, "evidence": [...]},
-      {"name": "勇敢", "degree": 3, "evidence": [...]}
+      {"name": "ambitious", "degree": 3, "evidence": [...]},
+      {"name": "creative", "degree": 3, "evidence": [...]}
     ],
     "interests": [
-      {"name": "篮球", "degree": 3, "evidence": [...]},
-      {"name": "音乐", "degree": 3, "evidence": [...]},
-      {"name": "阅读", "degree": 3, "evidence": [...]}
+      {"name": "basketball", "degree": 3, "evidence": [...]},
+      {"name": "music", "degree": 3, "evidence": [...]},
+      {"name": "reading", "degree": 3, "evidence": [...]}
     ]
   }
 }
 ```
 
-**错误处理**：
+**Error handling**:
 
-- **PalServer超时/不可达**：记录warning日志，返回空profile，用户可以正常对话
-- **PalServer返回错误**：记录warning日志，返回空profile
-- **数据格式异常**：记录warning日志，跳过异常字段
-- **并发请求**：数据库upsert天然幂等，无副作用
+- **MainService timeout/unreachable**: Log warning, return empty profile; user can continue normally.
+- **MainService returns error**: Log warning, return empty profile.
+- **Malformed data**: Log warning, skip the malformed fields.
+- **Concurrent requests**: Database upsert is naturally idempotent; no side effects.
 
-**架构说明**：
+**Architectural note**:
 
-⚠️ **架构原则Trade-off**: `basic_info`的设计原则是"conversation-extracted reference data"，但冷启动功能导入的是PalServer的权威数据。这是为了优化用户体验而接受的架构妥协。详见 `discuss/40-cold_start_implementation.md`。
+⚠️ **Architecture trade-off**: The design principle of `basic_info` is "conversation-extracted reference data", but the cold-start import brings in authoritative data from MainService. This is an accepted architectural compromise to improve user experience. See `discuss/40-cold_start_implementation.md`.
 
-**禁用方法**：
+**Disabling cold start**:
 
-如需禁用冷启动功能，将`PALSERVER_BASE_URL`设置为空或不设置即可：
+To disable the cold-start feature, set `MAINSERVICE_BASE_URL` to empty or leave it unset:
 ```bash
-PALSERVER_BASE_URL=
+MAINSERVICE_BASE_URL=
 ```
 
 ---
 
-### 6.6 POST /vocab 和 GET /vocab（预留）
+### 6.6 POST /vocab and GET /vocab (Reserved)
 
-**实现**：返回 501 Not Implemented
+**Implementation**: Returns 501 Not Implemented
 
 ```python
 @app.post("/vocab", summary="Update user vocabulary (Not Implemented)")
@@ -1199,15 +1205,15 @@ def get_vocab():
 
 ---
 
-## 7. 错误处理
+## 7. Error Handling
 
-### 7.1 四层容错机制
+### 7.1 Four-Layer Fault Tolerance
 
-#### 第 1 层：LLM 调用容错
+#### Layer 1: LLM Call Fault Tolerance
 
 ```python
 def call_llm_with_retry(self, prompt: str, max_retries: int = 2) -> str:
-    """带重试的 LLM 调用"""
+    """LLM call with retry"""
     for attempt in range(max_retries + 1):
         try:
             response = self.llm.generate_response(
@@ -1219,35 +1225,35 @@ def call_llm_with_retry(self, prompt: str, max_retries: int = 2) -> str:
             logger.error(f"LLM call failed (attempt {attempt + 1}/{max_retries + 1}): {e}")
             if attempt == max_retries:
                 raise Exception(f"LLM service unavailable after {max_retries + 1} attempts")
-            time.sleep(1)  # 等待 1 秒后重试
+            time.sleep(1)  # Wait 1 second before retrying
 ```
 
-#### 第 2 层：JSON 解析容错
+#### Layer 2: JSON Parse Fault Tolerance
 
 ```python
 from mem0.memory.utils import remove_code_blocks
 
 def parse_llm_response(response: str) -> Dict[str, Any]:
-    """解析 LLM 返回的 JSON，带容错"""
+    """Parse LLM-returned JSON with fault tolerance"""
     try:
         return json.loads(response)
     except json.JSONDecodeError as e:
         logger.warning(f"JSON parse failed, attempting to clean: {e}")
 
-        # 尝试去除 markdown 代码块
+        # Try removing markdown code block markers
         cleaned = remove_code_blocks(response)
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError:
             logger.error(f"JSON parse failed after cleaning. Response: {response}")
-            return {}  # 返回空字典，而不是崩溃
+            return {}  # Return empty dict rather than crashing
 ```
 
-#### 第 3 层：逐字段容错
+#### Layer 3: Per-Field Fault Tolerance
 
 ```python
 def update_additional_profile(self, user_id: str, decisions: Dict[str, Any]) -> Dict[str, Any]:
-    """更新扩展画像，逐字段容错"""
+    """Update extended profile with per-field fault tolerance"""
     results = {}
 
     for field in ["interests", "skills", "personality"]:
@@ -1262,17 +1268,17 @@ def update_additional_profile(self, user_id: str, decisions: Dict[str, Any]) -> 
     return results
 ```
 
-#### 第 4 层：数据库事务（PostgreSQL，可选）
+#### Layer 4: Database Transactions (PostgreSQL, optional)
 
 ```python
 def update_basic_info_transactional(self, user_id: str, data: Dict[str, Any]):
-    """使用事务更新基本信息"""
+    """Update basic info using a transaction"""
     conn = self.pool.getconn()
     try:
         conn.autocommit = False
         cursor = conn.cursor()
 
-        # 执行多个 SQL 操作
+        # Execute multiple SQL operations
         cursor.execute(...)
         cursor.execute(...)
 
@@ -1288,25 +1294,25 @@ def update_basic_info_transactional(self, user_id: str, data: Dict[str, Any]):
 
 ---
 
-### 7.2 错误码设计
+### 7.2 Error Code Design
 
-| HTTP 状态码 | 场景 | 返回示例 |
-|------------|------|---------|
-| 200 OK | 成功 | `{"results": {...}}` |
-| 400 Bad Request | 参数错误 | `{"detail": "user_id is required"}` |
-| 404 Not Found | 用户不存在 | `{"detail": "User u123 not found"}` |
-| 500 Internal Server Error | 服务器错误 | `{"detail": "LLM service unavailable"}` |
-| 501 Not Implemented | 功能未实现 | `{"detail": "Vocabulary feature not implemented"}` |
+| HTTP Status | Scenario | Response Example |
+|-------------|----------|-----------------|
+| 200 OK | Success | `{"results": {...}}` |
+| 400 Bad Request | Invalid parameters | `{"detail": "user_id is required"}` |
+| 404 Not Found | User not found | `{"detail": "User u123 not found"}` |
+| 500 Internal Server Error | Server error | `{"detail": "LLM service unavailable"}` |
+| 501 Not Implemented | Feature not implemented | `{"detail": "Vocabulary feature not implemented"}` |
 
 ---
 
-## 8. 实施步骤
+## 8. Implementation Steps
 
-### Phase 1: 基础架构（2-3 天）
+### Phase 1: Foundation (2-3 days)
 
-**目标**：搭建基本框架和数据库连接
+**Goal**: Set up the basic framework and database connections.
 
-#### 1.1 创建目录结构
+#### 1.1 Create Directory Structure
 ```bash
 mkdir -p mem0/user_profile/database
 touch mem0/user_profile/__init__.py
@@ -1321,9 +1327,9 @@ touch mem0/user_profile/database/postgres.py
 touch mem0/user_profile/database/mongodb.py
 ```
 
-#### 1.2 实现数据库管理器
+#### 1.2 Implement Database Managers
 
-**postgres.py** (核心方法)：
+**postgres.py** (core methods):
 ```python
 import psycopg2
 from psycopg2 import pool
@@ -1334,7 +1340,7 @@ logger = logging.getLogger(__name__)
 
 class PostgresManager:
     def __init__(self, config: Dict[str, Any]):
-        """初始化 PostgreSQL 连接池"""
+        """Initialize PostgreSQL connection pool"""
         self.pool = psycopg2.pool.SimpleConnectionPool(
             minconn=1,
             maxconn=10,
@@ -1346,12 +1352,12 @@ class PostgresManager:
         )
 
     def upsert_basic_info(self, user_id: str, data: Dict[str, Any]) -> None:
-        """插入或更新基本信息"""
+        """Insert or update basic info"""
         conn = self.pool.getconn()
         try:
             cursor = conn.cursor()
 
-            # 构建 UPSERT SQL
+            # Build UPSERT SQL
             fields = list(data.keys())
             placeholders = ["%s"] * len(fields)
 
@@ -1378,7 +1384,7 @@ class PostgresManager:
             self.pool.putconn(conn)
 
     def get_basic_info(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """获取基本信息"""
+        """Get basic info"""
         conn = self.pool.getconn()
         try:
             cursor = conn.cursor()
@@ -1397,7 +1403,7 @@ class PostgresManager:
             self.pool.putconn(conn)
 ```
 
-**mongodb.py** (核心方法)：
+**mongodb.py** (core methods):
 ```python
 from pymongo import MongoClient
 from typing import Dict, Any, Optional, List
@@ -1407,7 +1413,7 @@ logger = logging.getLogger(__name__)
 
 class MongoDBManager:
     def __init__(self, config: Dict[str, Any]):
-        """初始化 MongoDB 连接"""
+        """Initialize MongoDB connection"""
         self.client = MongoClient(
             config["uri"],
             maxPoolSize=10
@@ -1416,14 +1422,14 @@ class MongoDBManager:
         self.collection = self.db["user_additional_profile"]
 
     def get_additional_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """获取扩展画像"""
+        """Get extended profile"""
         doc = self.collection.find_one({"user_id": user_id})
         if doc:
-            doc.pop("_id", None)  # 移除 MongoDB 的 _id
+            doc.pop("_id", None)  # Remove MongoDB's _id
         return doc
 
     def update_field(self, user_id: str, field: str, items: List[Dict[str, Any]]) -> None:
-        """更新指定字段（interests / skills / personality）"""
+        """Update a specified field (interests / skills / personality)"""
         self.collection.update_one(
             {"user_id": user_id},
             {"$set": {
@@ -1435,7 +1441,7 @@ class MongoDBManager:
         logger.info(f"Updated {field} for user {user_id}")
 
     def add_item_to_field(self, user_id: str, field: str, item: Dict[str, Any]) -> None:
-        """向字段添加新项"""
+        """Append a new item to a field"""
         self.collection.update_one(
             {"user_id": user_id},
             {"$push": {field: item}},
@@ -1443,17 +1449,17 @@ class MongoDBManager:
         )
 ```
 
-#### 1.3 配置集成
+#### 1.3 Configuration Integration
 
-**server/main.py**（修改）：
+**server/main.py** (modifications):
 ```python
-# 新增环境变量
+# New environment variables
 MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://mongodb:27017")
 MONGODB_DATABASE = os.environ.get("MONGODB_DATABASE", "mem0_profile")
 
-# 扩展 DEFAULT_CONFIG
+# Extend DEFAULT_CONFIG
 DEFAULT_CONFIG = {
-    # ... 现有配置 ...
+    # ... existing config ...
 
     "user_profile": {
         "postgres": {
@@ -1472,21 +1478,21 @@ DEFAULT_CONFIG = {
 }
 ```
 
-**验收标准**：
-- ✅ 目录结构创建完成
-- ✅ PostgreSQL 连接成功，可以 UPSERT 和查询
-- ✅ MongoDB 连接成功，可以读写
-- ✅ 配置正确加载
+**Acceptance criteria**:
+- ✅ Directory structure created
+- ✅ PostgreSQL connection successful; UPSERT and query work
+- ✅ MongoDB connection successful; read/write works
+- ✅ Configuration loads correctly
 
 ---
 
-### Phase 2: Profile 功能（3-4 天）
+### Phase 2: Profile Features (3-4 days)
 
-**目标**：实现 set_profile 和 get_profile 的完整功能
+**Goal**: Implement the full set_profile and get_profile functionality.
 
-#### 2.1 实现 ProfileManager
+#### 2.1 Implement ProfileManager
 
-**profile_manager.py**：
+**profile_manager.py**:
 ```python
 class ProfileManager:
     def __init__(self, llm, postgres, mongodb):
@@ -1501,14 +1507,14 @@ class ProfileManager:
         manual_data: Optional[Dict[str, Any]] = None,
         options: Optional[Dict[str, bool]] = None
     ) -> Dict[str, Any]:
-        """完整的 set_profile 流程"""
+        """Complete set_profile flow"""
         options = options or {}
         results = {}
 
-        # Step 1: 提取信息（阶段 1 LLM）
+        # Step 1: Extract information (Stage 1 LLM)
         extracted = self._extract_profile(messages)
 
-        # Step 2: 更新 basic_info
+        # Step 2: Update basic_info
         if options.get("update_basic", True):
             basic_info = self._merge_basic_info(
                 extracted.get("basic_info", {}),
@@ -1518,21 +1524,21 @@ class ProfileManager:
                 self.postgres.upsert_basic_info(user_id, basic_info)
                 results["basic_info"] = basic_info
 
-        # Step 3: 查询现有扩展画像
+        # Step 3: Query existing extended profile
         current_additional = self.mongodb.get_additional_profile(user_id) or {}
 
-        # Step 4: LLM 判断更新（阶段 2 LLM）
+        # Step 4: LLM decides updates (Stage 2 LLM)
         decisions = self._decide_profile_updates(current_additional, extracted)
 
-        # Step 5: 执行更新
+        # Step 5: Execute updates
         if options.get("update_interests", True):
             results["interests"] = self._update_interests(user_id, decisions.get("interests", []))
-        # ... skills, personality 类似 ...
+        # ... skills, personality follow the same pattern ...
 
         return {"results": results}
 
     def _extract_profile(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
-        """阶段 1：LLM 提取"""
+        """Stage 1: LLM extraction"""
         from mem0.user_profile.prompts import get_profile_extraction_prompt
 
         prompt = get_profile_extraction_prompt(messages)
@@ -1548,7 +1554,7 @@ class ProfileManager:
         current: Dict[str, Any],
         extracted: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """阶段 2：LLM 判断"""
+        """Stage 2: LLM decision"""
         from mem0.user_profile.prompts import get_profile_update_decision_prompt
 
         prompt = get_profile_update_decision_prompt(current, extracted)
@@ -1560,9 +1566,9 @@ class ProfileManager:
         return parse_llm_response(response)
 ```
 
-#### 2.2 实现 UserProfile 主类
+#### 2.2 Implement UserProfile Main Class
 
-**main.py**：
+**main.py**:
 ```python
 from mem0.configs.base import MemoryConfig
 from mem0.utils.factory import LlmFactory
@@ -1574,17 +1580,17 @@ class UserProfile:
     def __init__(self, config: MemoryConfig):
         self.config = config
 
-        # 复用 LLM
+        # Reuse LLM
         self.llm = LlmFactory.create(
             config.llm.provider,
             config.llm.config
         )
 
-        # 初始化数据库
+        # Initialize databases
         self.postgres = PostgresManager(config.user_profile["postgres"])
         self.mongodb = MongoDBManager(config.user_profile["mongodb"])
 
-        # 初始化业务逻辑
+        # Initialize business logic
         self.profile_manager = ProfileManager(
             llm=self.llm,
             postgres=self.postgres,
@@ -1593,30 +1599,30 @@ class UserProfile:
 
     @classmethod
     def from_config(cls, config_dict: Dict[str, Any]):
-        """从字典配置创建实例"""
+        """Create instance from dict config"""
         from mem0.configs.base import MemoryConfig
         config = MemoryConfig(**config_dict)
         return cls(config)
 
     def set_profile(self, user_id: str, messages: List[Dict[str, str]], **kwargs):
-        """对外接口"""
+        """Public interface"""
         return self.profile_manager.set_profile(user_id, messages, **kwargs)
 
     def get_profile(self, user_id: str, type: str = "all", field: Optional[str] = None):
-        """对外接口"""
+        """Public interface"""
         return self.profile_manager.get_profile(user_id, type, field)
 ```
 
-#### 2.3 集成到 FastAPI
+#### 2.3 Integrate with FastAPI
 
-**server/main.py**（修改）：
+**server/main.py** (modifications):
 ```python
 from mem0.user_profile import UserProfile
 
-# 创建实例
+# Create instance
 USER_PROFILE_INSTANCE = UserProfile.from_config(DEFAULT_CONFIG)
 
-# 新增路由
+# New routes
 @app.post("/profile", summary="Update user profile")
 def set_profile(
     user_id: str,
@@ -1654,44 +1660,44 @@ def get_profile(
         raise HTTPException(status_code=500, detail=str(e))
 ```
 
-**验收标准**：
-- ✅ 可以调用 POST /profile 成功更新
-- ✅ 可以调用 GET /profile 成功查询
-- ✅ LLM 提取信息正确
-- ✅ LLM 判断更新正确
-- ✅ 数据正确存储到 PostgreSQL 和 MongoDB
+**Acceptance criteria**:
+- ✅ POST /profile can be called successfully to update
+- ✅ GET /profile can be called successfully to query
+- ✅ LLM correctly extracts information
+- ✅ LLM correctly decides updates
+- ✅ Data correctly stored in PostgreSQL and MongoDB
 
 ---
 
-### Phase 3: 测试和优化（1-2 天）
+### Phase 3: Testing and Optimization (1-2 days)
 
-详见第 9 节测试用例。
-
----
-
-### Phase 4: 文档和部署（1 天）
-
-- 更新 CLAUDE.md
-- 更新 TODO.md
-- 创建数据库初始化脚本
-- 更新 docker-compose.yaml
-- 更新 .env.example
+See Section 9 for test cases.
 
 ---
 
-## 9. 测试用例
+### Phase 4: Documentation and Deployment (1 day)
 
-### 9.1 基础功能测试
+- Update CLAUDE.md
+- Update TODO.md
+- Create database initialization scripts
+- Update docker-compose.yaml
+- Update .env.example
+
+---
+
+## 9. Test Cases
+
+### 9.1 Basic Functionality Tests
 
 ```python
 # test/test_user_profile.py
 
 def test_set_profile_basic():
-    """测试基本信息更新"""
+    """Test basic info update"""
     response = client.post("/profile", json={
         "user_id": "test_user_1",
         "messages": [
-            {"role": "user", "content": "我叫Alice，今年7岁，住在北京"}
+            {"role": "user", "content": "My name is Alice, I'm 28 years old and I live in New York"}
         ]
     })
 
@@ -1700,14 +1706,14 @@ def test_set_profile_basic():
 
     assert "basic_info" in data["results"]
     assert data["results"]["basic_info"]["values"]["name"] == "Alice"
-    assert data["results"]["basic_info"]["values"]["current_city"] == "北京"
+    assert data["results"]["basic_info"]["values"]["current_city"] == "New York"
 
 def test_set_profile_interests():
-    """测试兴趣更新"""
+    """Test interests update"""
     response = client.post("/profile", json={
         "user_id": "test_user_2",
         "messages": [
-            {"role": "user", "content": "我喜欢踢足球，每周都和朋友踢"}
+            {"role": "user", "content": "I love playing football, I play with friends every week"}
         ]
     })
 
@@ -1716,17 +1722,17 @@ def test_set_profile_interests():
 
     assert "interests" in data["results"]
     assert len(data["results"]["interests"]) > 0
-    assert any(item["name"] == "足球" for item in data["results"]["interests"])
+    assert any(item["name"] == "football" for item in data["results"]["interests"])
 
 def test_get_profile():
-    """测试获取画像"""
-    # 先设置
+    """Test getting profile"""
+    # Set first
     client.post("/profile", json={
         "user_id": "test_user_3",
-        "messages": [{"role": "user", "content": "我喜欢编程"}]
+        "messages": [{"role": "user", "content": "I enjoy programming"}]
     })
 
-    # 再获取
+    # Then get
     response = client.get("/profile?user_id=test_user_3&type=all")
     assert response.status_code == 200
 
@@ -1734,71 +1740,71 @@ def test_get_profile():
     assert "basic_info" in data or "additional_profile" in data
 ```
 
-### 9.2 边界情况测试
+### 9.2 Edge Case Tests
 
 ```python
 def test_empty_messages():
-    """测试空消息"""
+    """Test empty messages"""
     response = client.post("/profile", json={
         "user_id": "test_user_4",
         "messages": []
     })
-    # 应该正常处理，返回空结果
+    # Should handle gracefully and return empty results
     assert response.status_code == 200
 
 def test_invalid_json_from_llm():
-    """测试 LLM 返回无效 JSON（需要 mock）"""
-    # 使用 mock 让 LLM 返回无效 JSON
-    # 应该被第 2 层容错捕获，返回空结果而不是崩溃
+    """Test invalid JSON from LLM (requires mock)"""
+    # Use a mock to make the LLM return invalid JSON
+    # Should be caught by Layer 2 fault tolerance, returning empty results rather than crashing
     pass
 
 def test_conflict_resolution():
-    """测试矛盾处理"""
-    # 先建立兴趣
+    """Test conflict handling"""
+    # First establish an interest
     client.post("/profile", json={
         "user_id": "test_user_5",
-        "messages": [{"role": "user", "content": "我喜欢足球"}] * 5
+        "messages": [{"role": "user", "content": "I love football"}] * 5
     })
 
-    # 再说不喜欢
+    # Then express dislike
     response = client.post("/profile", json={
         "user_id": "test_user_5",
-        "messages": [{"role": "user", "content": "我不喜欢足球了"}]
+        "messages": [{"role": "user", "content": "I don't like football anymore"}]
     })
 
-    # 检查是降低 degree 还是删除
-    # （具体行为取决于 LLM 判断）
+    # Check whether degree was lowered or entry was deleted
+    # (exact behavior depends on LLM judgment)
 ```
 
 ---
 
-## 10. 部署配置
+## 10. Deployment Configuration
 
-### 10.1 数据库初始化脚本
+### 10.1 Database Initialization Scripts
 
-**scripts/init_user_profile_postgres.sql**：
+**scripts/init_user_profile_postgres.sql**:
 ```sql
--- 创建 schema
+-- Create schema
 CREATE SCHEMA IF NOT EXISTS user_profile;
 
--- 创建表
+-- Create table
 CREATE TABLE IF NOT EXISTS user_profile.user_profile (
-    -- ... 见第 3.1 节 ...
+    -- ... see Section 3.1 ...
 );
 
--- 创建触发器
--- ... 见第 3.1 节 ...
+-- Create trigger
+-- ... see Section 3.1 ...
 ```
 
-**scripts/init_user_profile_mongodb.js**：
+**scripts/init_user_profile_mongodb.js**:
 ```javascript
-// 连接到数据库
+// Connect to database
 db = db.getSiblingDB('mem0_profile');
 
-// 创建集合（如果不存在）
+// Create collection (if not exists)
 db.createCollection('user_additional_profile');
 
-// 创建索引
+// Create indexes
 db.user_additional_profile.createIndex({ "user_id": 1 }, { unique: true });
 db.user_additional_profile.createIndex({ "interests.name": 1 });
 db.user_additional_profile.createIndex({ "skills.name": 1 });
@@ -1807,16 +1813,16 @@ db.user_additional_profile.createIndex({ "personality.name": 1 });
 print("MongoDB initialization completed");
 ```
 
-### 10.2 docker-compose.yaml 更新
+### 10.2 docker-compose.yaml Updates
 
 ```yaml
 version: '3.8'
 
 services:
   postgres:
-    # ... 现有配置 ...
+    # ... existing config ...
 
-  mongodb:  # 新增
+  mongodb:  # new
     image: mongo:7.0
     container_name: mem0-mongodb
     restart: unless-stopped
@@ -1829,18 +1835,18 @@ services:
       - mem0_network
 
   mem0-service:
-    # ... 现有配置 ...
+    # ... existing config ...
     environment:
-      # ... 现有环境变量 ...
+      # ... existing env vars ...
       - MONGODB_URI=mongodb://mongodb:27017
       - MONGODB_DATABASE=mem0_profile
     depends_on:
       - postgres
-      - mongodb  # 新增依赖
+      - mongodb  # new dependency
 
 volumes:
   postgres_db:
-  mongodb_data:  # 新增
+  mongodb_data:  # new
   neo4j_data:
 
 networks:
@@ -1848,10 +1854,10 @@ networks:
     driver: bridge
 ```
 
-### 10.3 .env.example 更新
+### 10.3 .env.example Updates
 
 ```bash
-# ... 现有配置 ...
+# ... existing config ...
 
 # MongoDB Configuration (for UserProfile)
 MONGODB_URI=mongodb://mongodb:27017
@@ -1860,31 +1866,31 @@ MONGODB_DATABASE=mem0_profile
 
 ---
 
-## 附录 A：完整代码示例
+## Appendix A: Complete Code Examples
 
-由于篇幅限制，完整代码见各模块的实现文件。
-
----
-
-## 附录 B：常见问题 FAQ
-
-**Q1: 为什么 basic_info 不需要两阶段 LLM？**
-A: 因为 basic_info 的字段值是唯一的（如 current_city 只有一个值），提取到新值就直接覆盖，无需复杂的合并判断。
-
-**Q2: 如果 LLM 返回的 JSON 格式错误怎么办？**
-A: 有四层容错机制保护，见第 7 节。
-
-**Q3: 兴趣和技能可以重叠吗？**
-A: 可以。同一事物（如"足球"）可以同时出现在 interests 和 skills 中。
-
-**Q4: degree 如何动态调整？**
-A: 由阶段 2 的 LLM 综合 evidence 数量、质量和时间判断。
-
-**Q5: 词汇功能什么时候开发？**
-A: 下一阶段，详见 `archived/vocab_design.md`。
+Due to length constraints, complete code is available in each module's implementation file.
 
 ---
 
-**文档结束** 🎉
+## Appendix B: Frequently Asked Questions
 
-**下一步**：开始 Phase 1 的开发工作！
+**Q1: Why doesn't basic_info need a two-stage LLM process?**
+A: Because basic_info field values are unique (e.g., current_city has only one value). When a new value is extracted it is directly overwritten, requiring no complex merge logic.
+
+**Q2: What happens if the LLM returns malformed JSON?**
+A: Four layers of fault tolerance protect against this. See Section 7.
+
+**Q3: Can interests and skills overlap?**
+A: Yes. The same item (e.g., "football") can appear in both interests and skills simultaneously.
+
+**Q4: How is degree adjusted dynamically?**
+A: The Stage 2 LLM evaluates evidence volume, quality, and temporal distribution to determine the degree.
+
+**Q5: When will the vocabulary feature be developed?**
+A: In the next phase. See `archived/vocab_design.md`.
+
+---
+
+**End of document**
+
+**Next step**: Begin Phase 1 development!

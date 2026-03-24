@@ -8,3 +8,4 @@ langchain-neo4j
 rank_bm25
 pymongo>=4.0.0
 psycopg_pool
+psycopg2-binary

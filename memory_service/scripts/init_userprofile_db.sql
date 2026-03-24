@@ -22,10 +22,12 @@ CREATE TABLE IF NOT EXISTS user_profile.user_profile (
     timezone VARCHAR(50),
     language VARCHAR(50),
 
-    -- Education Fields (for children 3-9 years old)
-    school_name VARCHAR(200),
-    grade VARCHAR(50),
-    class_name VARCHAR(50)
+    -- Work & Education Fields
+    occupation VARCHAR(100),
+    company VARCHAR(200),
+    education_level VARCHAR(50),
+    university VARCHAR(200),
+    major VARCHAR(100)
 );
 
 -- Create indexes
@@ -48,9 +50,11 @@ COMMENT ON COLUMN user_profile.user_profile.hometown IS 'User hometown';
 COMMENT ON COLUMN user_profile.user_profile.current_city IS 'User current city of residence';
 COMMENT ON COLUMN user_profile.user_profile.timezone IS 'User timezone (e.g., Asia/Shanghai)';
 COMMENT ON COLUMN user_profile.user_profile.language IS 'User preferred language (e.g., zh-CN, en-US)';
-COMMENT ON COLUMN user_profile.user_profile.school_name IS '学校名称 (School name, e.g., 北京实验小学)';
-COMMENT ON COLUMN user_profile.user_profile.grade IS '年级，支持中英文 (Grade, supports Chinese/English, e.g., 三年级/Grade 3)';
-COMMENT ON COLUMN user_profile.user_profile.class_name IS '班级，可选 (Class name, optional, e.g., 3班/Class 3A)';
+COMMENT ON COLUMN user_profile.user_profile.occupation IS 'Current job title or profession';
+COMMENT ON COLUMN user_profile.user_profile.company IS 'Current employer or organization';
+COMMENT ON COLUMN user_profile.user_profile.education_level IS 'Highest education level (e.g., bachelor, master, PhD)';
+COMMENT ON COLUMN user_profile.user_profile.university IS 'Most recent or highest-level university attended';
+COMMENT ON COLUMN user_profile.user_profile.major IS 'Field of study or academic major';
 
 -- Grant permissions (adjust as needed for your environment)
 -- GRANT ALL PRIVILEGES ON SCHEMA user_profile TO your_app_user;
