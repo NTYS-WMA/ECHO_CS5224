@@ -107,6 +107,7 @@ ai_generation_service/
 | Method | Endpoint | Description | Status |
 |--------|----------|-------------|--------|
 | POST | `/api/v1/generation/execute` | **Primary** — template_id + variables/messages | ✅ Implemented |
+| POST | `/api/v1/generation/embeddings` | **Primary** — text embedding | ✅ Implemented |
 | POST | `/api/v1/generation/chat-completions` | Legacy — chat completion | ✅ Active (called by Orchestrator) |
 | POST | `/api/v1/generation/summaries` | Legacy — summary generation | ⚠️ Implemented, no callers |
 | POST | `/api/v1/generation/proactive-messages` | Legacy — proactive message | ⚠️ Implemented, no callers |
@@ -207,11 +208,11 @@ response = httpx.post("http://localhost:8003/api/v1/generation/execute", json={
 summary = response.json()["output"][0]["content"]
 ```
 
-### Use Case C: Proactive Outreach Message (Proactive Engagement Service)
+### Use Case C: Proactive Outreach Message (Cron Service)
 
 **template_id**: `tpl_proactive_outreach`
 
-The Proactive Engagement Service assembles the full context prompt (relationship tier, affinity, inactivity, tone, user preferences) and passes it as `user_prompt`.
+The Cron Service assembles the full context prompt (relationship tier, affinity, inactivity, tone, user preferences) and passes it as `user_prompt`.
 
 ```python
 # The caller assembles the full prompt
@@ -250,6 +251,35 @@ message = response.json()["output"][0]["content"]
   ],
   "model": "claude-sonnet",
   "usage": {"input_tokens": 156, "output_tokens": 32}
+}
+```
+
+### Use Case D: Text Embedding (Memory Service / Search)
+
+**Endpoint**: `POST /api/v1/generation/embeddings`
+
+The embedding endpoint generates dense vector representations of text using Amazon Titan Embeddings v2. Used for semantic search, similarity matching, and RAG.
+
+```python
+response = httpx.post("http://localhost:8003/api/v1/generation/embeddings", json={
+    "user_id": "usr_9f2a7c41",
+    "input": "User enjoys evening workouts and friendly check-ins.",
+    "correlation_id": "evt-emb-001"
+})
+
+embedding = response.json()["embedding"]       # List[float], e.g. 1024-dim vector
+dimension = response.json()["dimension"]        # 1024
+```
+
+**Response Format**:
+
+```json
+{
+  "response_id": "gen-a1b2c3d4e5f6",
+  "embedding": [0.0123, -0.0456, ...],
+  "dimension": 1024,
+  "model": "amazon.titan-embed-text-v2:0",
+  "usage": {"input_tokens": 12, "output_tokens": 0}
 }
 ```
 
@@ -296,6 +326,7 @@ All configuration is loaded from environment variables with the `AI_GEN_` prefix
 | `AI_GEN_PRIMARY_PROVIDER` | `bedrock` | Primary AI provider |
 | `AI_GEN_BEDROCK_REGION` | `ap-southeast-1` | AWS region for Bedrock |
 | `AI_GEN_BEDROCK_MODEL_ID` | `anthropic.claude-sonnet-4-20250514` | Bedrock model identifier |
+| `AI_GEN_BEDROCK_EMBEDDING_MODEL_ID` | `amazon.titan-embed-text-v2:0` | Bedrock embedding model identifier |
 | `AI_GEN_BEDROCK_TIMEOUT_SECONDS` | `30` | Request timeout |
 | `AI_GEN_EVENT_BROKER_URL` | `redis://localhost:6379/0` | Event broker connection URL |
 | `AI_GEN_CONVERSATION_STORE_BASE_URL` | `http://localhost:8010` | Conversation Persistence Store URL |
@@ -326,7 +357,10 @@ No credential configuration is needed. Attach an **IAM Role** to the EC2 instanc
   "Action": [
     "bedrock:InvokeModel"
   ],
-  "Resource": "arn:aws:bedrock:ap-southeast-1::foundation-model/anthropic.claude-sonnet-4-20250514"
+  "Resource": [
+    "arn:aws:bedrock:ap-southeast-1::foundation-model/anthropic.claude-sonnet-4-20250514",
+    "arn:aws:bedrock:ap-southeast-1::foundation-model/amazon.titan-embed-text-v2:0"
+  ]
 }
 ```
 
@@ -367,7 +401,7 @@ uvicorn ai_generation_service.app:app --host 0.0.0.0 --port 8003
 ### 4. Run tests
 
 ```bash
-# 37 unit tests — no AWS credentials required (providers are mocked)
+# 43 unit tests — no AWS credentials required (providers are mocked)
 pytest ai_generation_service/tests/ -v
 ```
 
@@ -377,7 +411,7 @@ pytest ai_generation_service/tests/ -v
 
 | Service | Interface Type | Status |
 |---------|---------------|--------|
-| Amazon Bedrock | AWS SDK (Converse API) | ✅ Implemented (`bedrock_provider.py`). Requires boto3 + AWS credentials at deploy time |
+| Amazon Bedrock | AWS SDK (Converse API + InvokeModel) | ✅ Implemented (`bedrock_provider.py`). Requires boto3 + AWS credentials at deploy time. Converse API for generation, InvokeModel for embeddings |
 | Conversation Persistence Store | HTTP API (read messages) | 🔶 Client implemented (`conversation_store_client.py`), target endpoint assumed/unconfirmed |
 | Internal Messaging Layer | Event publish | 🔶 Stub — logs only, no broker connected (`events/publisher.py`) |
 

@@ -26,12 +26,14 @@ from ..config.settings import Settings
 from ..events.publisher import EventPublisher
 from ..models.requests import (
     ChatCompletionRequest,
+    EmbeddingRequest,
     ProactiveMessageRequest,
     SummaryGenerationRequest,
     TemplateGenerationRequest,
 )
 from ..models.responses import (
     ChatCompletionResponse,
+    EmbeddingResponse,
     GenerationResponse,
     OutputItem,
     ProactiveMessageResponse,
@@ -179,6 +181,127 @@ class GenerationService:
         )
 
         return response
+
+    # ================================================================== #
+    # EMBEDDING INTERFACE
+    # ================================================================== #
+
+    async def embed(self, request: EmbeddingRequest) -> EmbeddingResponse:
+        """
+        Generate an embedding vector for the given input text.
+
+        This endpoint is parallel to execute() and uses the same primary
+        provider's embedding capability (e.g., Amazon Titan Embeddings).
+
+        Args:
+            request: The embedding request with input text.
+
+        Returns:
+            EmbeddingResponse with the embedding vector and usage info.
+
+        Raises:
+            GenerationError: If the provider fails after retries.
+        """
+        last_error = None
+
+        for attempt in range(1, self._settings.MAX_RETRY_ATTEMPTS + 1):
+            try:
+                logger.info(
+                    "Invoking primary provider '%s' for embedding (attempt %d/%d)",
+                    self._primary.provider_name,
+                    attempt,
+                    self._settings.MAX_RETRY_ATTEMPTS,
+                )
+                provider_response = await self._primary.embed(text=request.input)
+
+                response = EmbeddingResponse(
+                    response_id=generate_response_id(),
+                    embedding=provider_response.embedding,
+                    dimension=len(provider_response.embedding),
+                    model=provider_response.model,
+                    usage=UsageInfo(
+                        input_tokens=provider_response.input_tokens,
+                        output_tokens=0,
+                    ),
+                )
+
+                await self._publish_completed_event(
+                    operation="embedding",
+                    user_id=request.user_id,
+                    model=provider_response.model,
+                    usage={"input_tokens": provider_response.input_tokens, "output_tokens": 0},
+                    correlation_id=request.correlation_id,
+                )
+
+                return response
+
+            except ProviderTimeoutError as e:
+                last_error = e
+                logger.warning("Embedding provider timeout on attempt %d: %s", attempt, str(e))
+                if attempt < self._settings.MAX_RETRY_ATTEMPTS:
+                    backoff = self._settings.RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+                    await asyncio.sleep(backoff)
+            except ProviderError as e:
+                last_error = e
+                logger.warning("Embedding provider error on attempt %d: %s", attempt, str(e))
+                if attempt < self._settings.MAX_RETRY_ATTEMPTS:
+                    backoff = self._settings.RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+                    await asyncio.sleep(backoff)
+
+        # Try fallback if configured
+        if self._fallback and (
+            (isinstance(last_error, ProviderTimeoutError) and self._settings.FALLBACK_ON_TIMEOUT)
+            or (isinstance(last_error, ProviderError) and self._settings.FALLBACK_ON_PROVIDER_ERROR)
+        ):
+            try:
+                logger.info("Falling back to provider '%s' for embedding", self._fallback.provider_name)
+                provider_response = await self._fallback.embed(text=request.input)
+
+                response = EmbeddingResponse(
+                    response_id=generate_response_id(),
+                    embedding=provider_response.embedding,
+                    dimension=len(provider_response.embedding),
+                    model=provider_response.model,
+                    usage=UsageInfo(
+                        input_tokens=provider_response.input_tokens,
+                        output_tokens=0,
+                    ),
+                )
+
+                await self._publish_completed_event(
+                    operation="embedding",
+                    user_id=request.user_id,
+                    model=provider_response.model,
+                    usage={"input_tokens": provider_response.input_tokens, "output_tokens": 0},
+                    correlation_id=request.correlation_id,
+                )
+
+                return response
+
+            except (ProviderTimeoutError, ProviderError) as e:
+                last_error = e
+                logger.error("Fallback embedding also failed: %s", str(e))
+
+        error_code = (
+            "PROVIDER_TIMEOUT"
+            if isinstance(last_error, ProviderTimeoutError)
+            else "PROVIDER_ERROR"
+        )
+
+        await self._publish_failed_event(
+            operation="embedding",
+            user_id=request.user_id,
+            error_code=error_code,
+            retryable=isinstance(last_error, ProviderTimeoutError),
+            fallback_attempted=self._fallback is not None,
+            correlation_id=request.correlation_id,
+        )
+
+        raise GenerationError(
+            error_code=error_code,
+            message=str(last_error),
+            retryable=isinstance(last_error, ProviderTimeoutError),
+        )
 
     # ================================================================== #
     # LEGACY INTERFACES (backward compatibility)
@@ -363,7 +486,7 @@ class GenerationService:
         Assembles the context block and maps to template-based execution.
         """
         # Build context block — this is the business-layer assembly that
-        # will eventually move to the Proactive Engagement Service caller
+        # will eventually move to the Cron Service caller
         context_parts = [
             f"Relationship tier: {request.relationship.tier}",
             f"Affinity score: {request.relationship.affinity_score:.2f}",
