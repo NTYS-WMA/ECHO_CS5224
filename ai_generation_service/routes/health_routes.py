@@ -4,6 +4,8 @@ Health check routes for the AI Generation Service.
 
 from fastapi import APIRouter
 
+from ..config.settings import get_settings
+
 router = APIRouter(tags=["Health"])
 
 
@@ -14,7 +16,12 @@ router = APIRouter(tags=["Health"])
 )
 async def health_check():
     """Basic liveness check."""
-    return {"status": "healthy", "service": "ai-generation-service"}
+    settings = get_settings()
+    return {
+        "status": "healthy",
+        "service": "ai-generation-service",
+        "version": settings.SERVICE_VERSION,
+    }
 
 
 @router.get(
