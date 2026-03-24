@@ -6,9 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # ── OpenAI ────────────────────────────────────────────────────────────────
-    openai_api_key: str
-    openai_model: str = "gpt-4o"
+    # ── AI Generation Service ─────────────────────────────────────────────────
+    ai_generation_service_url: str = "http://ai-generation-service:8003"
 
     # ── PostgreSQL (shared DB) ────────────────────────────────────────────────
     database_url: str        # asyncpg — e.g. postgresql+asyncpg://user:pass@host/db

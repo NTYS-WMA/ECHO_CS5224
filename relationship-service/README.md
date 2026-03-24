@@ -13,7 +13,7 @@ Scores are maintained on a **0–1 scale** and map to four relationship tiers:
 | 0.61 – 0.80 | Close Friend |
 | 0.81 – 1.00 | Best Friend |
 
-Scoring is session-based — GPT-4o evaluates the sentiment of a completed conversation and adjusts the score accordingly. A passive decay of -0.005/day applies to inactive users.
+Scoring is session-based — the AI Generation Service evaluates the sentiment of a completed conversation and adjusts the score accordingly. A passive decay of -0.005/day applies to inactive users.
 
 ## Architecture
 
@@ -33,7 +33,7 @@ This service connects to the **shared PostgreSQL database** owned by the main ap
 
 | Job | Schedule | Description |
 |---|---|---|
-| `session_score_job` | Every 15 min | Scores completed conversation sessions via GPT-4o |
+| `session_score_job` | Every 15 min | Scores completed conversation sessions via the AI Generation Service |
 | `inactivity_decay_job` | Daily at 03:00 UTC | Applies -0.005/day decay to inactive users |
 
 ## Database Tables
@@ -45,7 +45,7 @@ This service connects to the **shared PostgreSQL database** owned by the main ap
 | `relationship_scores` | This service | Read/Write |
 | `score_history` | This service | Write (audit log) |
 
-The `score_history` table records every scoring event with sentiment, delta, new score, and GPT-4o's reasoning — useful for monitoring score changes in production.
+The `score_history` table records every scoring event with sentiment, delta, new score, and the AI's reasoning — useful for monitoring score changes in production.
 
 ## Setup
 
@@ -65,8 +65,8 @@ cp .env.example .env
 
 Edit `.env`:
 ```
-OPENAI_API_KEY=sk-...
 DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/echo_db
+AI_GENERATION_SERVICE_URL=http://ai-generation-service:8003
 ```
 
 ### 3. Ensure shared DB tables exist
@@ -142,30 +142,23 @@ CREATE TABLE messages (
 
 Set `is_proactive = TRUE` for messages where ECHO initiates contact unprompted — the scoring model treats unanswered proactive messages as a mild negative signal.
 
-### For the AI Service
+### For the AI Generation Service
 
-The relationship service calls the AI service for session scoring. The AI service must expose a single-turn completion endpoint:
+The relationship service calls the AI Generation Service for session scoring via:
 
 ```
-POST /api/v1/completions
+POST http://ai-generation-service:8003/api/v1/generation/execute
 Content-Type: application/json
 
 {
-  "prompt": "<session transcript>",
-  "max_tokens": 120
+  "user_id": "relationship-service",
+  "template_id": "tpl_sentiment_analysis",
+  "variables": { "text": "<session transcript>" },
+  "generation_config": { "max_tokens": 256 }
 }
 ```
 
-Response:
-```json
-{
-  "text": "<raw model output>"
-}
-```
-
-The response must return **raw text** (not structured JSON) — the relationship service parses the model output itself.
-
-Once the AI service is ready, replace [services/ai_service.py](services/ai_service.py) with an HTTP client that calls this endpoint. The only contract the rest of this service depends on is:
+The implementation is in [services/ai_service.py](services/ai_service.py). The only contract the rest of this service depends on is:
 
 ```python
 async def complete(prompt: str, max_tokens: int = 256) -> str
@@ -250,9 +243,8 @@ UPDATE users SET last_active_at = NOW() - INTERVAL '40 minutes' WHERE id = 'user
 
 | Variable | Default | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | required | OpenAI API key |
-| `OPENAI_MODEL` | `gpt-4o` | Model used for session scoring |
 | `DATABASE_URL` | required | Async PostgreSQL URL (`postgresql+asyncpg://...`) |
+| `AI_GENERATION_SERVICE_URL` | `http://ai-generation-service:8003` | AI Generation Service base URL |
 | `PORT` | `18089` | Service port |
 | `LOG_LEVEL` | `INFO` | Logging level |
 | `APP_ENV` | `development` | Environment name |
