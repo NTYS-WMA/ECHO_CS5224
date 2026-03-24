@@ -86,6 +86,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 18087 --reload
 - `memories` (vector memory storage)
 - `memory_history` (replacing original SQLite history table)
 - `user_profile.user_profile` (basic profile fields extracted from chat)
+- `users` (shared user table for relationship workflows)
+- `messages` (shared message table for relationship workflows)
 - `relationship_scores`
 - `score_history`
 
