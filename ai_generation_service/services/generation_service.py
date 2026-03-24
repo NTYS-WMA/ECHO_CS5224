@@ -486,7 +486,7 @@ class GenerationService:
         Assembles the context block and maps to template-based execution.
         """
         # Build context block — this is the business-layer assembly that
-        # will eventually move to the Proactive Engagement Service caller
+        # will eventually move to the Cron Service caller
         context_parts = [
             f"Relationship tier: {request.relationship.tier}",
             f"Affinity score: {request.relationship.affinity_score:.2f}",

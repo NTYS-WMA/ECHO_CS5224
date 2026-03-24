@@ -175,7 +175,7 @@ class ProactiveMessageResponse(BaseModel):
     """
     Response body for POST /api/v1/generation/proactive-messages.
 
-    Returned to: Proactive Engagement Service
+    Returned to: Cron Service
     """
 
     response_id: str = Field(
