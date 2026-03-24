@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # Service identity
     SERVICE_NAME: str = "ai-generation-service"
-    SERVICE_VERSION: str = "2.0.0"
+    SERVICE_VERSION: str = "2.1.0"
     HOST: str = "0.0.0.0"
     PORT: int = 8003
 
