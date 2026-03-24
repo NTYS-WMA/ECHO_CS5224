@@ -306,14 +306,68 @@ See `config/settings.py` for the full list of configurable parameters.
 
 ## Running the Service
 
+### 1. Install dependencies
+
 ```bash
-# Install dependencies
 pip install -r requirements.txt
+```
 
-# Run with uvicorn
+### 2. Configure AWS credentials
+
+The AI Generation Service uses **Amazon Bedrock** (via `boto3`) as its primary AI provider. `boto3` follows the standard [AWS credential resolution chain](https://docs.aws.amazon.com/sdkref/latest/guide/standardized-credentials.html), so how you provide credentials depends on where you run the service.
+
+#### Production (EC2 / ECS / Lambda)
+
+No credential configuration is needed. Attach an **IAM Role** to the EC2 instance, ECS task definition, or Lambda function with the following permissions:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "bedrock:InvokeModel"
+  ],
+  "Resource": "arn:aws:bedrock:ap-southeast-1::foundation-model/anthropic.claude-sonnet-4-20250514"
+}
+```
+
+`boto3` automatically retrieves temporary credentials from the instance metadata service (IMDS) or task role. No environment variables need to be set.
+
+#### Local development / debugging
+
+Export your AWS credentials in the terminal before starting the service:
+
+```bash
+# Option A: IAM user long-term credentials (not recommended for production)
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="wJal..."
+export AWS_DEFAULT_REGION="ap-southeast-1"
+
+# Option B: Temporary credentials from STS (e.g., after `aws sts assume-role`)
+export AWS_ACCESS_KEY_ID="ASIA..."
+export AWS_SECRET_ACCESS_KEY="wJal..."
+export AWS_SESSION_TOKEN="FwoG..."
+export AWS_DEFAULT_REGION="ap-southeast-1"
+```
+
+Alternatively, configure a named profile in `~/.aws/credentials` and set:
+
+```bash
+export AWS_PROFILE="your-profile-name"
+export AWS_DEFAULT_REGION="ap-southeast-1"
+```
+
+> **Tip**: The Bedrock region can also be set via the service config variable `AI_GEN_BEDROCK_REGION` (default: `ap-southeast-1`). This is the region where `boto3` creates the Bedrock Runtime client — it is independent of `AWS_DEFAULT_REGION`.
+
+### 3. Start the service
+
+```bash
 uvicorn ai_generation_service.app:app --host 0.0.0.0 --port 8003
+```
 
-# Run tests (37 tests)
+### 4. Run tests
+
+```bash
+# 37 unit tests — no AWS credentials required (providers are mocked)
 pytest ai_generation_service/tests/ -v
 ```
 
