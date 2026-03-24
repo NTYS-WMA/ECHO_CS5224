@@ -3,6 +3,10 @@ Event models for the Cron Service v2.0.
 
 Defines event payloads published to the Internal Messaging Layer
 when tasks are dispatched or when lifecycle changes occur.
+
+Topics:
+    - cron.task.dispatched  — task successfully sent to Dispatch Hub.
+    - cron.task.failed      — task exhausted retries and failed permanently.
 """
 
 from datetime import datetime, timezone
@@ -13,7 +17,7 @@ from pydantic import BaseModel, Field
 
 class TaskDispatchedEvent(BaseModel):
     """
-    Event published to topic: proactive.task.dispatched
+    Event published to topic: cron.task.dispatched
 
     Emitted when a scheduled task is successfully dispatched to the
     Message Dispatch Hub.
@@ -21,7 +25,7 @@ class TaskDispatchedEvent(BaseModel):
 
     event_id: str = Field(..., description="Unique event identifier.")
     event_type: str = Field(
-        default="proactive.task.dispatched",
+        default="cron.task.dispatched",
         description="Event type discriminator.",
     )
     schema_version: str = Field(default="2.0", description="Schema version.")
@@ -39,7 +43,7 @@ class TaskDispatchedEvent(BaseModel):
 
 class TaskFailedEvent(BaseModel):
     """
-    Event published to topic: proactive.task.failed
+    Event published to topic: cron.task.failed
 
     Emitted when a scheduled task exhausts all retries and is marked
     as permanently failed.
@@ -47,7 +51,7 @@ class TaskFailedEvent(BaseModel):
 
     event_id: str = Field(..., description="Unique event identifier.")
     event_type: str = Field(
-        default="proactive.task.failed",
+        default="cron.task.failed",
         description="Event type discriminator.",
     )
     schema_version: str = Field(default="2.0", description="Schema version.")
@@ -67,19 +71,12 @@ class OutboundMessagePayload(BaseModel):
     """
     Payload sent to the Message Dispatch Hub for outbound delivery.
 
-    Published to topic: conversation.outbound
+    This is an HTTP request body — not published to the event bus.
+    The Cron Service is a pure task scheduler; channel delivery is
+    owned by the Message Dispatch Hub and downstream gateways.
     """
 
-    event_id: str = Field(..., description="Unique event identifier.")
-    event_type: str = Field(
-        default="conversation.outbound",
-        description="Event type discriminator.",
-    )
-    schema_version: str = Field(default="2.0", description="Schema version.")
-    timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-        description="Event timestamp (UTC).",
-    )
+    event_id: str = Field(..., description="Unique event identifier for idempotency.")
     task_id: str = Field(..., description="Source task identifier.")
     user_id: str = Field(..., description="Target user identifier.")
     channel: str = Field(..., description="Target delivery channel.")
@@ -102,4 +99,3 @@ class OutboundMessagePayload(BaseModel):
         None,
         description="Additional metadata from the registrant.",
     )
-    correlation_id: Optional[str] = Field(None, description="Correlation ID for tracing.")

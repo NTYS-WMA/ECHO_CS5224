@@ -346,7 +346,7 @@ class TestEventModels:
             channel="telegram",
             owner_service="test",
         )
-        assert event.event_type == "proactive.task.dispatched"
+        assert event.event_type == "cron.task.dispatched"
         assert event.schema_version == "2.0"
 
     def test_task_failed_event(self):
@@ -360,7 +360,7 @@ class TestEventModels:
             error="Connection refused",
             retry_count=3,
         )
-        assert event.event_type == "proactive.task.failed"
+        assert event.event_type == "cron.task.failed"
         assert event.retry_count == 3
 
     def test_outbound_message_payload(self):
@@ -373,7 +373,7 @@ class TestEventModels:
             channel="whatsapp",
             content="Hello from ECHO!",
         )
-        assert payload.event_type == "conversation.outbound"
+        assert payload.event_id == "evt_003"
         assert payload.message_type == "text"
 
 

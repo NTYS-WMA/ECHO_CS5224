@@ -100,7 +100,7 @@ cron/
 │
 ├── events/
 │   ├── __init__.py
-│   └── publisher.py             # Event publisher (broker placeholder)
+│   └── publisher.py             # Event publisher (HTTP broker client)
 │
 ├── utils/
 │   ├── __init__.py
@@ -185,7 +185,7 @@ All settings are loaded from environment variables with the `CRON_` prefix:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CRON_SERVICE_NAME` | `cron-service` | Service name |
-| `CRON_PORT` | `8002` | HTTP port |
+| `CRON_PORT` | `8005` | HTTP port |
 | `CRON_DATABASE_SERVICE_URL` | `http://localhost:8010` | Database Service URL |
 | `CRON_DISPATCH_HUB_URL` | `http://localhost:8020` | Message Dispatch Hub URL |
 | `CRON_POLL_INTERVAL_SECONDS` | `30` | Polling interval (min: 5) |
@@ -203,7 +203,7 @@ All settings are loaded from environment variables with the `CRON_` prefix:
 pip install -r requirements.txt
 
 # Start the service
-uvicorn cron.app:app --host 0.0.0.0 --port 8002
+uvicorn cron.app:app --host 0.0.0.0 --port 8005
 
 # Run tests
 python -m pytest cron/tests/ -v
