@@ -1,103 +1,101 @@
 """
-DB Manager — async SQLAlchemy operations for the Relationship Service.
+DB Manager — HTTP client for the Relationship Service.
 
-Only includes the queries this service needs. All writes are scoped to
-the relationship_scores table. User and Message rows are read-only.
+All DB operations are delegated to the db-manager service via its REST API.
+No direct database connection is held here.
+
+Endpoint prefix: {db_manager_url}/relationship-db
 """
-from datetime import datetime, timedelta, timezone
+import logging
+from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select, update, or_
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+import httpx
 
 from config import get_settings
-from models.schema import Message, RelationshipScore, ScoreHistory, User
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
-engine = create_async_engine(settings.database_url, echo=False, pool_pre_ping=True)
-AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+_BASE = f"{settings.db_manager_url}/relationship-db"
+
+
+# ─── Internal helper ──────────────────────────────────────────────────────────
+
+
+async def _put_score(user_id: str, payload: dict) -> None:
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.put(f"{_BASE}/scores/{user_id}", json=payload)
+        r.raise_for_status()
 
 
 # ─── Users (read-only) ────────────────────────────────────────────────────────
 
 
-async def get_user_by_id(session: AsyncSession, user_id: str) -> Optional[User]:
-    result = await session.execute(select(User).where(User.id == user_id))
-    return result.scalar_one_or_none()
+async def get_user_by_id(user_id: str) -> Optional[dict]:
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(f"{_BASE}/users/{user_id}")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
 
 
-async def get_users_with_ended_sessions(
-    session: AsyncSession,
-    inactive_minutes: int = 30,
-) -> list[tuple[User, RelationshipScore]]:
+async def get_users_with_ended_sessions(inactive_minutes: int = 30) -> list[dict]:
     """
-    Return (User, RelationshipScore) pairs whose session has ended and not yet scored.
-
-    Eligibility:
-      1. last_active_at < now - inactive_minutes  — session ended
-      2. last_scored_at IS NULL OR last_scored_at < last_active_at — unscored messages exist
+    Return flat dicts whose session has ended and not yet scored.
+    Each dict contains combined user + relationship_score fields.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=inactive_minutes)
-    result = await session.execute(
-        select(User, RelationshipScore)
-        .join(RelationshipScore, RelationshipScore.user_id == User.id)
-        .where(
-            User.onboarding_complete == True,
-            User.last_active_at < cutoff,
-            or_(
-                RelationshipScore.last_scored_at.is_(None),
-                RelationshipScore.last_scored_at < User.last_active_at,
-            ),
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(
+            f"{_BASE}/users/ended-sessions",
+            params={"inactive_minutes": inactive_minutes},
         )
-    )
-    return result.all()
+        r.raise_for_status()
+        return r.json()["results"]
 
 
-async def get_inactive_users(session: AsyncSession, inactive_hours: int) -> list[User]:
+async def get_inactive_users(inactive_hours: int) -> list[dict]:
     """Return onboarded users inactive for more than `inactive_hours`."""
-    threshold = datetime.now(timezone.utc) - timedelta(hours=inactive_hours)
-    result = await session.execute(
-        select(User).where(
-            User.last_active_at < threshold,
-            User.onboarding_complete == True,
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(
+            f"{_BASE}/users/inactive",
+            params={"inactive_hours": inactive_hours},
         )
-    )
-    return result.scalars().all()
+        r.raise_for_status()
+        return r.json()["results"]
 
 
 # ─── Messages (read-only) ─────────────────────────────────────────────────────
 
 
 async def get_messages_since_datetime(
-    session: AsyncSession,
     user_id: str,
     since: Optional[datetime],
-) -> list[Message]:
+) -> list[dict]:
     """Return all messages for a user after `since`, in chronological order."""
-    query = (
-        select(Message)
-        .where(Message.user_id == user_id)
-        .order_by(Message.created_at.asc())
-    )
+    params: dict = {"user_id": user_id}
     if since is not None:
-        query = query.where(Message.created_at > since)
-    result = await session.execute(query)
-    return result.scalars().all()
+        params["since"] = since.isoformat()
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(f"{_BASE}/messages", params=params)
+        r.raise_for_status()
+        return r.json()["results"]
 
 
 # ─── Relationship Score (read/write) ─────────────────────────────────────────
 
 
-async def get_relationship_score(session: AsyncSession, user_id: str) -> Optional[RelationshipScore]:
-    result = await session.execute(
-        select(RelationshipScore).where(RelationshipScore.user_id == user_id)
-    )
-    return result.scalar_one_or_none()
+async def get_relationship_score(user_id: str) -> Optional[dict]:
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(f"{_BASE}/scores/{user_id}")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
 
 
 async def update_relationship_score(
-    session: AsyncSession,
     user_id: str,
     delta: float,
     is_positive: bool,
@@ -106,33 +104,59 @@ async def update_relationship_score(
     """
     Adjust score by `delta` and return the new score.
 
-    Interaction counters are only incremented for real session scores, not decay.
+    Fetches current score from db-manager, computes the new value locally,
+    then PUTs the result back. Interaction counters are only incremented
+    for real session scores, not decay.
     """
-    rel = await get_relationship_score(session, user_id)
-    if not rel:
-        rel = RelationshipScore(user_id=user_id)
-        session.add(rel)
+    rel = await get_relationship_score(user_id)
+    if rel is None:
+        rel = {
+            "score": 0.10,
+            "total_interactions": 0,
+            "positive_interactions": 0,
+            "negative_interactions": 0,
+            "last_decay_at": None,
+        }
 
-    rel.score = max(0.0, min(1.0, rel.score + delta))
-
-    if not is_decay:
-        rel.total_interactions += 1
-        if is_positive:
-            rel.positive_interactions += 1
-        else:
-            rel.negative_interactions += 1
-
-    now = datetime.now(timezone.utc)
-    rel.last_updated = now
+    new_score = max(0.0, min(1.0, rel["score"] + delta))
+    payload: dict = {
+        "score": new_score,
+        "total_interactions": rel["total_interactions"] + (0 if is_decay else 1),
+        "positive_interactions": rel["positive_interactions"] + (1 if not is_decay and is_positive else 0),
+        "negative_interactions": rel["negative_interactions"] + (1 if not is_decay and not is_positive else 0),
+    }
     if is_decay:
-        rel.last_decay_at = now
+        payload["last_decay_at"] = datetime.now(timezone.utc).isoformat()
 
-    await session.commit()
-    return rel.score
+    await _put_score(user_id, payload)
+    return new_score
+
+
+async def set_score_absolute(
+    user_id: str,
+    score: float,
+    current_rel: Optional[dict] = None,
+) -> None:
+    """
+    Set score to an exact value without touching interaction counters.
+
+    Pass `current_rel` (from a prior get_relationship_score call) to avoid
+    an extra round-trip.
+    """
+    if current_rel is None:
+        current_rel = await get_relationship_score(user_id)
+        if current_rel is None:
+            return
+    payload = {
+        "score": max(0.0, min(1.0, score)),
+        "total_interactions": current_rel["total_interactions"],
+        "positive_interactions": current_rel["positive_interactions"],
+        "negative_interactions": current_rel["negative_interactions"],
+    }
+    await _put_score(user_id, payload)
 
 
 async def insert_score_history(
-    session: AsyncSession,
     user_id: str,
     delta: float,
     new_score: float,
@@ -141,23 +165,29 @@ async def insert_score_history(
     intensity: Optional[str] = None,
     reasoning: Optional[str] = None,
 ) -> None:
-    session.add(ScoreHistory(
-        user_id=user_id,
-        delta=delta,
-        new_score=new_score,
-        sentiment=sentiment,
-        intensity=intensity,
-        reasoning=reasoning,
-        reason=reason,
-    ))
-    await session.commit()
+    payload = {
+        "delta": delta,
+        "new_score": new_score,
+        "reason": reason,
+        "sentiment": sentiment,
+        "intensity": intensity,
+        "reasoning": reasoning,
+    }
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(f"{_BASE}/scores/{user_id}/history", json=payload)
+        r.raise_for_status()
 
 
-async def stamp_last_scored_at(session: AsyncSession, user_id: str) -> None:
+async def stamp_last_scored_at(user_id: str) -> None:
     """Mark a session as scored so it is not re-evaluated on the next cron run."""
-    await session.execute(
-        update(RelationshipScore)
-        .where(RelationshipScore.user_id == user_id)
-        .values(last_scored_at=datetime.now(timezone.utc))
-    )
-    await session.commit()
+    rel = await get_relationship_score(user_id)
+    if rel is None:
+        return
+    payload = {
+        "score": rel["score"],
+        "total_interactions": rel["total_interactions"],
+        "positive_interactions": rel["positive_interactions"],
+        "negative_interactions": rel["negative_interactions"],
+        "last_scored_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await _put_score(user_id, payload)

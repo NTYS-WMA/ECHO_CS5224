@@ -7,11 +7,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # ── AI Generation Service ─────────────────────────────────────────────────
-    ai_generation_service_url: str = "http://ai-generation-service:8003"
+    ai_generation_service_url: str = "http://localhost:8003"
 
-    # ── PostgreSQL (shared DB) ────────────────────────────────────────────────
-    database_url: str        # asyncpg — e.g. postgresql+asyncpg://user:pass@host/db
-    database_sync_url: str = ""  # psycopg2 for Alembic (optional)
+    # ── DB Manager Service ────────────────────────────────────────────────────
+    db_manager_url: str = "http://localhost:18087"
 
     # ── Application ───────────────────────────────────────────────────────────
     app_env: str = "development"
