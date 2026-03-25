@@ -19,11 +19,8 @@ Public API
 """
 import json
 import logging
-import uuid
 from datetime import datetime, timezone
 from typing import Optional
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import managers.db_manager as db_manager
 import services.ai_service as ai_service
@@ -77,20 +74,21 @@ def _get_tier(score: float) -> str:
     return "acquaintance"
 
 
-def _format_conversation(messages) -> str:
+def _format_conversation(messages: list[dict]) -> str:
     lines = []
     for i, m in enumerate(messages):
-        if m.role == "assistant" and m.is_proactive:
+        if m["role"] == "assistant" and m.get("is_proactive"):
+            m_time = datetime.fromisoformat(m["created_at"])
             has_reply = any(
-                n.role == "user" and n.created_at > m.created_at
+                n["role"] == "user" and datetime.fromisoformat(n["created_at"]) > m_time
                 for n in messages[i + 1:]
             )
             if has_reply:
-                lines.append(f"ECHO [proactive]: {m.content}")
+                lines.append(f"ECHO [proactive]: {m['content']}")
             else:
-                lines.append(f"ECHO [proactive, no reply from user]: {m.content}")
+                lines.append(f"ECHO [proactive, no reply from user]: {m['content']}")
         else:
-            lines.append(f"{m.role.upper()}: {m.content}")
+            lines.append(f"{m['role'].upper()}: {m['content']}")
     return "\n".join(lines)
 
 
@@ -143,93 +141,92 @@ def _publish_score_event(
 # ─── Public API ───────────────────────────────────────────────────────────────
 
 
-async def get_relationship_context(session: AsyncSession, user_id: str) -> Optional[dict]:
+async def get_relationship_context(user_id: str) -> Optional[dict]:
     """Return relationship context for a user, or None if no record exists."""
-    rel = await db_manager.get_relationship_score(session, user_id)
+    rel = await db_manager.get_relationship_score(user_id)
     if not rel:
         return None
 
-    user = await db_manager.get_user_by_id(session, user_id)
+    user = await db_manager.get_user_by_id(user_id)
     now = datetime.now(timezone.utc)
-    last_interaction = user.last_active_at if user else None
-    if last_interaction and last_interaction.tzinfo is None:
-        last_interaction = last_interaction.replace(tzinfo=timezone.utc)
+    last_interaction_str = user.get("last_active_at") if user else None
+    if last_interaction_str:
+        last_interaction = datetime.fromisoformat(last_interaction_str)
+        if last_interaction.tzinfo is None:
+            last_interaction = last_interaction.replace(tzinfo=timezone.utc)
+    else:
+        last_interaction = None
     days_inactive = max(0, (now - last_interaction).days) if last_interaction else 0
 
     return {
         "user_id": user_id,
-        "affinity_score": round(rel.score, 4),
-        "tier": _get_tier(rel.score),
-        "interaction_count": rel.total_interactions,
+        "affinity_score": round(rel["score"], 4),
+        "tier": _get_tier(rel["score"]),
+        "interaction_count": rel["total_interactions"],
         "last_interaction_at": last_interaction.isoformat() if last_interaction else None,
         "decay_state": {
-            "last_decay_at": rel.last_decay_at.isoformat() if rel.last_decay_at else None,
+            "last_decay_at": rel.get("last_decay_at"),
             "days_inactive": days_inactive,
         },
-        "updated_at": rel.last_updated.isoformat() if rel.last_updated else None,
+        "updated_at": rel.get("last_updated"),
     }
 
 
 async def set_relationship_score(
-    session: AsyncSession,
     user_id: str,
     new_score: float,
 ) -> Optional[dict]:
     """Directly set affinity score for a user (admin use). Returns None if no record exists."""
-    rel = await db_manager.get_relationship_score(session, user_id)
+    rel = await db_manager.get_relationship_score(user_id)
     if rel is None:
         return None
 
-    previous_score = rel.score
-    rel.score = max(0.0, min(1.0, new_score))
-    rel.last_updated = datetime.now(timezone.utc)
-    await session.commit()
+    previous_score = rel["score"]
+    clamped = max(0.0, min(1.0, new_score))
 
+    await db_manager.set_score_absolute(user_id, clamped, current_rel=rel)
     await db_manager.insert_score_history(
-        session=session,
         user_id=user_id,
-        delta=rel.score - previous_score,
-        new_score=rel.score,
+        delta=clamped - previous_score,
+        new_score=clamped,
         reason="manual_update",
     )
-    _publish_score_event(user_id, previous_score, rel.score, rel.score - previous_score, "manual_update")
+    _publish_score_event(user_id, previous_score, clamped, clamped - previous_score, "manual_update")
 
     return {
         "user_id": user_id,
         "previous_score": round(previous_score, 4),
-        "new_score": round(rel.score, 4),
+        "new_score": round(clamped, 4),
         "previous_tier": _get_tier(previous_score),
-        "new_tier": _get_tier(rel.score),
+        "new_tier": _get_tier(clamped),
     }
 
 
-async def run_session_scoring(session: AsyncSession) -> None:
+async def run_session_scoring() -> None:
     """Score all ended conversation sessions. Called by cron every 15 min."""
-    users = await db_manager.get_users_with_ended_sessions(
-        session, inactive_minutes=SESSION_TIMEOUT_MINUTES
-    )
-    if not users:
+    rows = await db_manager.get_users_with_ended_sessions(inactive_minutes=SESSION_TIMEOUT_MINUTES)
+    if not rows:
         return
 
-    logger.info("Session scoring: %d user(s) eligible.", len(users))
-    for user, rel in users:
-        last_scored_at = rel.last_scored_at if rel else None
-        await _score_conversation_session(session, user.id, last_scored_at)
+    logger.info("Session scoring: %d user(s) eligible.", len(rows))
+    for row in rows:
+        last_scored_at_str = row.get("last_scored_at")
+        last_scored_at = datetime.fromisoformat(last_scored_at_str) if last_scored_at_str else None
+        await _score_conversation_session(row["id"], last_scored_at)
 
 
 async def _score_conversation_session(
-    session: AsyncSession,
     user_id: str,
     last_scored_at: Optional[datetime],
 ) -> float:
-    messages = await db_manager.get_messages_since_datetime(session, user_id, since=last_scored_at)
-    user_messages = [m for m in messages if m.role == "user"]
+    messages = await db_manager.get_messages_since_datetime(user_id, since=last_scored_at)
+    user_messages = [m for m in messages if m["role"] == "user"]
 
     if not user_messages:
         logger.debug("No user messages to score for user %s — stamping and skipping.", user_id)
-        await db_manager.stamp_last_scored_at(session, user_id)
-        rel = await db_manager.get_relationship_score(session, user_id)
-        return rel.score if rel else 0.10
+        await db_manager.stamp_last_scored_at(user_id)
+        rel = await db_manager.get_relationship_score(user_id)
+        return rel["score"] if rel else 0.10
 
     prompt = _SESSION_SCORE_PROMPT.format(conversation=_format_conversation(messages))
 
@@ -248,18 +245,16 @@ async def _score_conversation_session(
         delta = 0.0
         is_positive = True
 
-    rel = await db_manager.get_relationship_score(session, user_id)
-    previous_score = rel.score if rel else 0.10
+    rel = await db_manager.get_relationship_score(user_id)
+    previous_score = rel["score"] if rel else 0.10
 
     new_score = await db_manager.update_relationship_score(
-        session=session,
         user_id=user_id,
         delta=delta,
         is_positive=is_positive,
     )
-    await db_manager.stamp_last_scored_at(session, user_id)
+    await db_manager.stamp_last_scored_at(user_id)
     await db_manager.insert_score_history(
-        session=session,
         user_id=user_id,
         delta=delta,
         new_score=new_score,
@@ -272,32 +267,29 @@ async def _score_conversation_session(
     return new_score
 
 
-async def run_inactivity_decay(session: AsyncSession, inactive_hours: int = 24) -> None:
+async def run_inactivity_decay(inactive_hours: int = 24) -> None:
     """Apply passive score decay to all users inactive for at least `inactive_hours`. Called daily."""
-    inactive_users = await db_manager.get_inactive_users(session, inactive_hours=inactive_hours)
+    inactive_users = await db_manager.get_inactive_users(inactive_hours=inactive_hours)
     for user in inactive_users:
-        new_score = await apply_inactivity_decay(session, user.id, days_inactive=1)
-        logger.debug("Decay applied for user %s → score=%.4f", user.id, new_score)
+        new_score = await apply_inactivity_decay(user["id"], days_inactive=1)
+        logger.debug("Decay applied for user %s → score=%.4f", user["id"], new_score)
 
 
 async def apply_inactivity_decay(
-    session: AsyncSession,
     user_id: str,
     days_inactive: int,
 ) -> float:
     """Apply -0.005 per day of inactivity for a single user."""
-    rel = await db_manager.get_relationship_score(session, user_id)
-    previous_score = rel.score if rel else 0.10
+    rel = await db_manager.get_relationship_score(user_id)
+    previous_score = rel["score"] if rel else 0.10
     delta = -(0.005 * days_inactive)
     new_score = await db_manager.update_relationship_score(
-        session=session,
         user_id=user_id,
         delta=delta,
         is_positive=False,
         is_decay=True,
     )
     await db_manager.insert_score_history(
-        session=session,
         user_id=user_id,
         delta=delta,
         new_score=new_score,

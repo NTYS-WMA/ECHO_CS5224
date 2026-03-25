@@ -3,17 +3,9 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 pydantic-settings==2.4.0
 
-# Database
-sqlalchemy==2.0.35
-asyncpg==0.29.0
-aiosqlite==0.20.0
-
-# AI
+# HTTP client (db-manager + ai-generation-service)
 httpx==0.28.1
 tenacity==9.0.0
-
-# Runtime
-greenlet==3.3.2
 
 # Scheduler
 apscheduler==3.10.4

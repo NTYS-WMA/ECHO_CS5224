@@ -7,21 +7,14 @@ Relationship API — REST endpoints exposed by the Relationship Service.
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import managers.relationship_manager as relationship_manager
-from managers.db_manager import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/relationships", tags=["relationships"])
-
-
-async def get_session():
-    async with AsyncSessionLocal() as session:
-        yield session
 
 
 # ─── Response / Request models ────────────────────────────────────────────────
@@ -65,33 +58,26 @@ class ScoreUpdateResponse(BaseModel):
 
 
 @router.get("/{user_id}/context", response_model=RelationshipContextResponse)
-async def get_relationship_context(
-    user_id: str,
-    session: AsyncSession = Depends(get_session),
-):
+async def get_relationship_context(user_id: str):
     """
     Return relationship context for a user.
     Called by the orchestrator to personalise the system prompt.
     Returns 404 if the user has no relationship record.
     """
-    context = await relationship_manager.get_relationship_context(session, user_id)
+    context = await relationship_manager.get_relationship_context(user_id)
     if context is None:
         raise HTTPException(status_code=404, detail=f"No relationship record for user {user_id}")
     return context
 
 
 @router.patch("/{user_id}/score", response_model=ScoreUpdateResponse)
-async def update_relationship_score(
-    user_id: str,
-    body: ScoreUpdateRequest,
-    session: AsyncSession = Depends(get_session),
-):
+async def update_relationship_score(user_id: str, body: ScoreUpdateRequest):
     """
     Directly set the affinity score for a user.
     Admin / testing use only. Score must be 0.0–1.0.
     Returns 404 if the user has no relationship record.
     """
-    result = await relationship_manager.set_relationship_score(session, user_id, body.score)
+    result = await relationship_manager.set_relationship_score(user_id, body.score)
     if result is None:
         raise HTTPException(status_code=404, detail=f"No relationship record for user {user_id}")
     return result
