@@ -2,6 +2,7 @@
 Relationship Service — standalone FastAPI microservice.
 
 Runs on port 18089 (internal network only).
+All database access is delegated to the db-manager service (port 18087).
 
 Endpoints:
   GET   /api/v1/relationships/{user_id}/context
@@ -20,13 +21,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from api.relationships import router as relationships_router
 from config import get_settings
-from managers import db_manager, relationship_manager
-from managers.db_manager import AsyncSessionLocal
-from models.schema import Base
+from managers import relationship_manager
 
 settings = get_settings()
 
@@ -39,14 +37,12 @@ logger = logging.getLogger(__name__)
 
 async def session_score_job() -> None:
     """Score completed conversation sessions for all eligible users."""
-    async with AsyncSessionLocal() as session:
-        await relationship_manager.run_session_scoring(session)
+    await relationship_manager.run_session_scoring()
 
 
 async def inactivity_decay_job() -> None:
     """Apply daily relationship score decay to long-inactive users."""
-    async with AsyncSessionLocal() as session:
-        await relationship_manager.run_inactivity_decay(session, inactive_hours=24)
+    await relationship_manager.run_inactivity_decay(inactive_hours=24)
 
 
 def _create_scheduler() -> AsyncIOScheduler:
@@ -74,12 +70,6 @@ def _create_scheduler() -> AsyncIOScheduler:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create relationship_scores table if it doesn't exist
-    engine = create_async_engine(settings.database_url, echo=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    await engine.dispose()
-
     scheduler = _create_scheduler()
     scheduler.start()
     logger.info("Relationship Service started on port %d", settings.port)
