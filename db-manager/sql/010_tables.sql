@@ -35,9 +35,11 @@ CREATE TABLE IF NOT EXISTS user_profile.user_profile (
     current_city VARCHAR(100),
     timezone VARCHAR(50),
     language VARCHAR(50),
-    school_name VARCHAR(200),
-    grade VARCHAR(50),
-    class_name VARCHAR(50)
+    occupation VARCHAR(100),
+    company VARCHAR(200),
+    education_level VARCHAR(50),
+    university VARCHAR(200),
+    major VARCHAR(100)
 );
 
 -- Relationship service owned tables

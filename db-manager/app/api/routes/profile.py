@@ -36,9 +36,11 @@ class BasicInfo(BaseModel):
     current_city: Optional[str] = None
     timezone: Optional[str] = None
     language: Optional[str] = None
-    school_name: Optional[str] = None
-    grade: Optional[str] = None
-    class_name: Optional[str] = None
+    occupation: Optional[str] = None
+    company: Optional[str] = None
+    education_level: Optional[str] = None
+    university: Optional[str] = None
+    major: Optional[str] = None
 
 class InterestItem(BaseModel):
     id: str
@@ -147,12 +149,14 @@ async def get_missing_fields(
             if not basic_info:
                 missing_basic = ["name", "nickname", "english_name", "birthday", "gender", 
                                "nationality", "hometown", "current_city", "timezone", 
-                               "language", "school_name", "grade", "class_name"]
+                               "language", "occupation", "company", "education_level",
+                               "university", "major"]
             else:
                 # Check which fields are null/empty
                 for field in ["name", "nickname", "english_name", "birthday", "gender", 
                             "nationality", "hometown", "current_city", "timezone", 
-                            "language", "school_name", "grade", "class_name"]:
+                            "language", "occupation", "company", "education_level",
+                            "university", "major"]:
                     if not basic_info.get(field):
                         missing_basic.append(field)
     
