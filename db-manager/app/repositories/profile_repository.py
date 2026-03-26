@@ -25,11 +25,13 @@ class ProfileRepository:
             """
             INSERT INTO user_profile.user_profile (
                 user_id, name, nickname, english_name, birthday, gender, nationality,
-                hometown, current_city, timezone, language, school_name, grade, class_name
+                hometown, current_city, timezone, language, occupation, company,
+                education_level, university, major
             )
             VALUES (
                 :user_id, :name, :nickname, :english_name, :birthday, :gender, :nationality,
-                :hometown, :current_city, :timezone, :language, :school_name, :grade, :class_name
+                :hometown, :current_city, :timezone, :language, :occupation, :company,
+                :education_level, :university, :major
             )
             ON CONFLICT (user_id) DO UPDATE SET
                 name = EXCLUDED.name,
@@ -42,9 +44,11 @@ class ProfileRepository:
                 current_city = EXCLUDED.current_city,
                 timezone = EXCLUDED.timezone,
                 language = EXCLUDED.language,
-                school_name = EXCLUDED.school_name,
-                grade = EXCLUDED.grade,
-                class_name = EXCLUDED.class_name,
+                occupation = EXCLUDED.occupation,
+                company = EXCLUDED.company,
+                education_level = EXCLUDED.education_level,
+                university = EXCLUDED.university,
+                major = EXCLUDED.major,
                 updated_at = NOW()
             """
         )
@@ -60,9 +64,11 @@ class ProfileRepository:
             "current_city": basic_info.get("current_city"),
             "timezone": basic_info.get("timezone"),
             "language": basic_info.get("language"),
-            "school_name": basic_info.get("school_name"),
-            "grade": basic_info.get("grade"),
-            "class_name": basic_info.get("class_name"),
+            "occupation": basic_info.get("occupation"),
+            "company": basic_info.get("company"),
+            "education_level": basic_info.get("education_level"),
+            "university": basic_info.get("university"),
+            "major": basic_info.get("major"),
         }
         await session.execute(query, payload)
 
@@ -79,4 +85,3 @@ class ProfileRepository:
             {"$set": {"user_id": user_id, **additional}},
             upsert=True,
         )
-
