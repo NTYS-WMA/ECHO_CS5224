@@ -50,6 +50,7 @@ def _mock_chat_completion(messages: list[dict]) -> dict[str, Any]:
 
     return {
         "response_id": f"gen-mock-{uuid.uuid4().hex[:6]}",
+        "template_id": "tpl_chat_completion",
         "output": [
             {
                 "type": "text",

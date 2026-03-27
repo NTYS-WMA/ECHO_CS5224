@@ -37,10 +37,6 @@ class Settings(BaseSettings):
     # These are used only when neither the caller nor the template provides values.
     DEFAULT_TEMPERATURE: float = 0.7
     DEFAULT_MAX_TOKENS: int = 512
-    SUMMARY_TEMPERATURE: float = 0.3
-    SUMMARY_MAX_TOKENS: int = 300
-    PROACTIVE_TEMPERATURE: float = 0.8
-    PROACTIVE_MAX_TOKENS: int = 150
 
     # Prompt template management
     # Templates directory path is auto-resolved relative to the package,
@@ -51,10 +47,6 @@ class Settings(BaseSettings):
     # TO BE UPDATED: Actual broker implementation details (e.g., Redis Streams, RabbitMQ, or local queue)
     EVENT_BROKER_URL: str = "redis://localhost:6379/0"
     EVENT_PUBLISH_ENABLED: bool = True
-
-    # Conversation Persistence Store
-    # TO BE UPDATED: Actual endpoint once Conversation Persistence Store is deployed
-    CONVERSATION_STORE_BASE_URL: str = "http://localhost:8010"
 
     # Retry and fallback policy
     MAX_RETRY_ATTEMPTS: int = 2

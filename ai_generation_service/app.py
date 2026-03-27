@@ -18,7 +18,6 @@ from .routes.generation_routes import router as generation_router
 from .routes.health_routes import router as health_router
 from .routes.template_routes import router as template_router
 from .services.bedrock_provider import BedrockProvider
-from .services.conversation_store_client import ConversationStoreClient
 from .services.fallback_provider import FallbackProvider
 from .services.generation_service import GenerationService
 from .services.template_manager import TemplateManager
@@ -101,17 +100,11 @@ async def lifespan(app: FastAPI):
     )
     await event_publisher.connect()
 
-    # ---- Conversation Store Client ----
-    conversation_store = ConversationStoreClient(
-        base_url=settings.CONVERSATION_STORE_BASE_URL,
-    )
-
     # ---- Core Generation Service ----
     _generation_service = GenerationService(
         primary_provider=primary_provider,
         fallback_provider=fallback_provider,
         event_publisher=event_publisher,
-        conversation_store=conversation_store,
         template_renderer=template_renderer,
         settings=settings,
     )
