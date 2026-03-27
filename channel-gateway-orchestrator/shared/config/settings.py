@@ -14,10 +14,11 @@ class Settings(BaseSettings):
 
     #Service URLs
     memory_service_url: str = Field(default="http://localhost:18088")
-    user_profile_service_url: str = Field(default="http://localhost:8001")
-    relationship_service_url: str = Field(default="http://localhost:8002")
+    user_profile_service_url: str = Field(default="http://localhost:18088")
+    relationship_service_url: str = Field(default="http://localhost:18089")
     ai_generation_service_url: str = Field(default="http://localhost:8003")
     conversation_store_url: str = Field(default="http://localhost:8004")
+    db_manager_url: str = Field(default="http://localhost:18087")
 
     #App
     app_host: str = Field(default="0.0.0.0")

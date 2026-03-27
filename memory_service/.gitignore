@@ -1,0 +1,17 @@
+test/dify_config.json
+.env
+*.tar
+.venv
+.claude
+history
+perf_log
+discuss
+archived
+.idea
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python

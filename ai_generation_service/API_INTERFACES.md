@@ -354,9 +354,263 @@ Generate a dense vector embedding for the given input text. Uses the configured 
 
 The following legacy endpoints have been removed as all callers have migrated to `/execute`:
 
-- `POST /api/v1/generation/chat-completions` — replaced by `/execute` with `template_id: "tpl_chat_completion"` + `messages`
-- `POST /api/v1/generation/summaries` — replaced by `/execute` with `template_id: "tpl_memory_compaction"` + `variables`
-- `POST /api/v1/generation/proactive-messages` — replaced by `/execute` with `template_id: "tpl_proactive_outreach"` + `variables`
+> **Status**: ✅ Implemented and actively called by **Channel Gateway Orchestrator** (`ai_generation_client.py`). Maintain until Orchestrator migrates to `/execute`.
+
+Accepts a conversation message list and returns an AI-generated reply. If `template_id` is omitted, uses `tpl_chat_completion`.
+
+**Request Body**:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `user_id` | string | Yes | Internal user identifier |
+| `conversation_id` | string | Yes | Conversation identifier |
+| `messages` | array of `MessageItem` | Yes | Ordered conversation messages (min 1) |
+| `template_id` | string | No | Template ID to use (default: `tpl_chat_completion`) |
+| `generation_config` | GenerationConfig | No | Override generation parameters |
+| `correlation_id` | string | No | Correlation ID for tracing |
+
+**Request Example**:
+
+```json
+{
+  "user_id": "usr_9f2a7c41",
+  "conversation_id": "telegram-chat-123456789",
+  "messages": [
+    {"role": "system", "content": "You are ECHO, a warm companion."},
+    {"role": "user", "content": "Hey ECHO!"}
+  ],
+  "generation_config": {
+    "temperature": 0.7,
+    "max_tokens": 200
+  },
+  "correlation_id": "evt-001"
+}
+```
+
+**Response** `200 OK`:
+
+```json
+{
+  "response_id": "gen-445",
+  "output": [
+    {"type": "text", "content": "Hey! Great to hear from you."}
+  ],
+  "model": "claude-sonnet",
+  "usage": {
+    "input_tokens": 156,
+    "output_tokens": 22
+  }
+}
+```
+
+---
+
+### 4.4 Inactive Legacy Endpoints (No Active Callers)
+
+> **Status**: ⚠️ Code implemented but **no service in the codebase currently calls these endpoints**. Candidates for removal in a future cleanup pass once confirmed that no planned callers exist.
+
+#### POST /api/v1/generation/summaries
+
+Accepts a message window reference and generates a compact summary. If `template_id` is omitted, uses `tpl_memory_compaction`. This endpoint depends on the Conversation Persistence Store (assumed interface, see [ASSUMED_INTERFACES.md](./ASSUMED_INTERFACES.md)).
+
+#### POST /api/v1/generation/proactive-messages
+
+Accepts relationship context and generates a personalized check-in message. If `template_id` is omitted, uses `tpl_proactive_outreach`.
+
+> **Note**: The `usage` field in the proactive message response is optional and may be `null`.
+
+> See the Swagger UI at `/docs` for detailed request/response schemas for these endpoints.
+
+---
+
+### 4.5 Migration Guide: Legacy Endpoints → `/execute`
+
+This section helps business teams migrate from the legacy endpoints (defined in the architecture draft) to the unified `/execute` endpoint. For each use case, the **Before** shows the old calling convention and the **After** shows the new one.
+
+#### Use Case A: Chat Completion (Conversation Orchestrator)
+
+**Before** — `POST /api/v1/generation/chat-completions`:
+
+```json
+{
+  "user_id": "usr_9f2a7c41",
+  "conversation_id": "telegram-chat-123456789",
+  "messages": [
+    {"role": "system", "content": "You are ECHO, a warm companion."},
+    {"role": "user", "content": "Hey ECHO, any trail suggestions?"},
+    {"role": "assistant", "content": "Sure! What difficulty level?"},
+    {"role": "user", "content": "Something moderate, about 2 hours."}
+  ],
+  "generation_config": {
+    "temperature": 0.7,
+    "max_tokens": 200
+  },
+  "correlation_id": "evt-001"
+}
+```
+
+**After** — `POST /api/v1/generation/execute`:
+
+```json
+{
+  "user_id": "usr_9f2a7c41",
+  "conversation_id": "telegram-chat-123456789",
+  "template_id": "tpl_chat_completion",
+  "messages": [
+    {"role": "system", "content": "You are ECHO, a warm companion."},
+    {"role": "user", "content": "Hey ECHO, any trail suggestions?"},
+    {"role": "assistant", "content": "Sure! What difficulty level?"},
+    {"role": "user", "content": "Something moderate, about 2 hours."}
+  ],
+  "generation_config": {
+    "temperature": 0.7,
+    "max_tokens": 200
+  },
+  "correlation_id": "evt-001"
+}
+```
+
+**What changes**:
+
+| Item | Before | After |
+|------|--------|-------|
+| Endpoint | `POST /api/v1/generation/chat-completions` | `POST /api/v1/generation/execute` |
+| New required field | — | `"template_id": "tpl_chat_completion"` |
+| `messages` field | Same | Same (no change) |
+| `generation_config` | Same | Same (no change) |
+| Response body | `{response_id, output, model, usage}` | `{response_id, template_id, output, model, usage}` (adds `template_id`) |
+
+> **Migration effort**: Minimal. Change the endpoint URL, add `template_id`, handle the extra `template_id` field in the response (or ignore it).
+
+---
+
+#### Use Case B: Memory Compaction Summary (Memory Service)
+
+**Before** — `POST /api/v1/generation/summaries` (architecture draft):
+
+```json
+{
+  "user_id": "usr_9f2a7c41",
+  "conversation_id": "telegram-chat-123456789",
+  "messages_window": {
+    "from_message_id": "msg-601",
+    "to_message_id": "msg-645"
+  },
+  "summary_type": "memory_compaction",
+  "correlation_id": "evt-022"
+}
+```
+
+The old endpoint would internally fetch conversation messages from the Conversation Persistence Store and assemble the prompt.
+
+**After** — `POST /api/v1/generation/execute`:
+
+```json
+{
+  "user_id": "usr_9f2a7c41",
+  "template_id": "tpl_memory_compaction",
+  "variables": {
+    "user_prompt": "Please summarize the following conversation into a compact memory entry.\nSummary type: memory_compaction\n\nConversation:\n[user]: I went for a run this evening.\n[assistant]: That's great! How did it go?\n[user]: It was good, I ran 5km in the park.\n[assistant]: Nice! That's a solid distance.\n\nProvide a concise summary capturing the user's key preferences, emotional state, and important facts."
+  },
+  "generation_config": {
+    "temperature": 0.3,
+    "max_tokens": 300
+  },
+  "correlation_id": "evt-022"
+}
+```
+
+**What changes**:
+
+| Item | Before | After |
+|------|--------|-------|
+| Endpoint | `POST /api/v1/generation/summaries` | `POST /api/v1/generation/execute` |
+| Message retrieval | AI service fetches messages via `messages_window` | **Caller fetches messages** and assembles them into `user_prompt` |
+| `summary_type` | Dedicated field | Embedded in `user_prompt` text |
+| `conversation_id` | Required | Optional (only needed for tracking) |
+| New required field | — | `"template_id": "tpl_memory_compaction"` |
+| Response body | `{content, model, usage}` | `{response_id, template_id, output[], model, usage}` — summary text is in `output[0].content` |
+
+> **Migration effort**: Medium. The caller must now fetch conversation messages itself and assemble the full prompt. The `summary_type` and conversation text are concatenated into a single `user_prompt` string. The response format also changes — extract `output[0].content` instead of `content`.
+
+---
+
+#### Use Case C: Proactive Outreach Message (Cron Service)
+
+**Before** — `POST /api/v1/generation/proactive-messages` (architecture draft):
+
+```json
+{
+  "user_id": "usr_9f2a7c41",
+  "relationship": {
+    "tier": "close_friend",
+    "affinity_score": 0.74,
+    "days_inactive": 3
+  },
+  "context": {
+    "recent_summary": "User enjoys evening workouts",
+    "timezone": "Asia/Singapore"
+  },
+  "constraints": {
+    "max_tokens": 120,
+    "tone": "warm"
+  },
+  "correlation_id": "evt-6001"
+}
+```
+
+**After** — `POST /api/v1/generation/execute`:
+
+```json
+{
+  "user_id": "usr_9f2a7c41",
+  "template_id": "tpl_proactive_outreach",
+  "variables": {
+    "user_prompt": "Based on the following context, compose a short, natural check-in message to re-engage this user. The message should feel genuine and not automated.\n\nRelationship tier: close_friend\nAffinity score: 0.74\nDays since last interaction: 3\nDesired tone: warm\nUser timezone: Asia/Singapore\nRecent context about the user: User enjoys evening workouts\n\nGenerate only the message text, nothing else."
+  },
+  "generation_config": {
+    "max_tokens": 120
+  },
+  "correlation_id": "evt-6001"
+}
+```
+
+**What changes**:
+
+| Item | Before | After |
+|------|--------|-------|
+| Endpoint | `POST /api/v1/generation/proactive-messages` | `POST /api/v1/generation/execute` |
+| `relationship` (structured) | Dedicated object with `tier`, `affinity_score`, `days_inactive` | Flattened into `user_prompt` text |
+| `context` (structured) | Dedicated object with `recent_summary`, `timezone` | Flattened into `user_prompt` text |
+| `constraints.tone` | Dedicated field | Embedded in `user_prompt` text (e.g., "Desired tone: warm") |
+| `constraints.max_tokens` | Inside `constraints` object | Moved to `generation_config.max_tokens` |
+| New required field | — | `"template_id": "tpl_proactive_outreach"` |
+| Response body | `{response_id, output, model, usage}` | `{response_id, template_id, output, model, usage}` (adds `template_id`) |
+
+> **Migration effort**: Medium. The caller must flatten the structured `relationship`, `context`, and `constraints` fields into a single `user_prompt` string. The `max_tokens` constraint moves to `generation_config`. The caller gains full control over prompt wording, which allows more flexible personalization.
+
+---
+
+#### Response Format Comparison
+
+All three use cases now return the same unified response format from `/execute`:
+
+```json
+{
+  "response_id": "gen-a1b2c3d4e5f6",
+  "template_id": "tpl_chat_completion",
+  "output": [
+    {"type": "text", "content": "Generated text here."}
+  ],
+  "model": "claude-sonnet",
+  "usage": {
+    "input_tokens": 156,
+    "output_tokens": 32
+  }
+}
+```
+
+To extract the generated text: `response["output"][0]["content"]`.
 
 ---
 

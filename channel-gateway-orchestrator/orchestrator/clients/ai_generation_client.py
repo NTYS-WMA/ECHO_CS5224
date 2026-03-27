@@ -1,7 +1,7 @@
 """
 Client for the AI Generation Service.
 
-POST /api/v1/generation/execute
+POST /api/v1/generation/execute  (template_id: tpl_chat_completion, messages mode)
 
 Falls back to a simple echo-style mock when MOCK_SERVICES=true.
 """
