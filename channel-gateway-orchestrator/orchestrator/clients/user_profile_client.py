@@ -1,9 +1,12 @@
 """
-Client for the User Profile Service.
+Client for user profile data.
 
-GET  /api/v1/users/{user_id}/profile
-PATCH /api/v1/users/{user_id}/profile
-POST /api/v1/users/{user_id}/onboarding/transitions
+Profile data is served by the Memory Service (MyMem0) at the same base URL
+as memory operations. The Memory Service extracts and maintains profile data
+(basic info + interests/skills/personality) from conversation messages.
+
+GET /profile?user_id={user_id}  → fetch profile
+POST /profile                   → extract + update profile from messages (called via memory_client)
 
 Falls back to mock responses when MOCK_SERVICES=true.
 """
@@ -24,43 +27,62 @@ def _get_client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is None or _http_client.is_closed:
         _http_client = httpx.AsyncClient(
-            base_url=settings.user_profile_service_url,
+            base_url=settings.memory_service_url,  # Memory service hosts the profile API
             timeout=10.0,
         )
     return _http_client
 
 
-#Mock Data
+# Mock Data
 
-def _mock_profile(user_id: str, username: str = "alice123") -> dict[str, Any]:
+def _mock_profile(user_id: str, username: str = "") -> dict[str, Any]:
     return {
         "user_id": user_id,
-        "external_user_id": f"telegram:mock",
-        "channel": "telegram",
         "display_name": username.capitalize() if username else "User",
-        "username": username,
         "language": "en",
         "timezone": "Asia/Singapore",
-        "onboarding": {
-            "state": "completed",
-            "completed_at": "2026-03-10T09:00:00Z",
-        },
-        "preferences": {
-            "tone": "friendly",
-            "interests": ["general"],
-            "quiet_hours": {
-                "start": "22:00",
-                "end": "07:00",
-            },
-        },
-        "consent": {
-            "personalization": True,
-            "proactive_messaging": True,
-            "analytics": True,
-        },
-        "account_tier": "free",
-        "created_at": "2026-03-09T14:00:00Z",
-        "updated_at": "2026-03-11T15:10:01Z",
+        "tone": "friendly",
+        "interests": ["general"],
+        "onboarding_state": "completed",
+        "consent_personalization": True,
+    }
+
+
+def _parse_memory_profile(data: dict[str, Any], username: str = "") -> dict[str, Any]:
+    """
+    Normalise the Memory Service profile response into the flat structure
+    the orchestrator expects.
+
+    Memory Service returns:
+      {
+        "user_id": "...",
+        "basic_info": { "name": ..., "timezone": ..., "language": ..., ... },
+        "additional_profile": { "interests": [{"name": ..., ...}], ... }
+      }
+    """
+    basic = data.get("basic_info") or {}
+    additional = data.get("additional_profile") or {}
+
+    # display_name: prefer name, then nickname, then username fallback
+    display_name = (
+        basic.get("name")
+        or basic.get("nickname")
+        or (username.capitalize() if username else "User")
+    )
+
+    # interests: list of name strings extracted from evidence-backed interest objects
+    raw_interests = additional.get("interests") or []
+    interests = [i.get("name") for i in raw_interests if i.get("name")]
+
+    return {
+        "user_id": data.get("user_id", ""),
+        "display_name": display_name,
+        "language": basic.get("language") or "en",
+        "timezone": basic.get("timezone") or "UTC",
+        "tone": "friendly",           # not tracked by memory service — use default
+        "interests": interests,
+        "onboarding_state": "completed",   # not tracked by memory service — use default
+        "consent_personalization": True,   # not tracked by memory service — use default
     }
 
 
@@ -68,9 +90,10 @@ def _mock_profile(user_id: str, username: str = "alice123") -> dict[str, Any]:
 
 async def get_user_profile(user_id: str, username: str = "") -> Optional[dict[str, Any]]:
     """
-    Fetch user profile from User Profile Service.
+    Fetch user profile from the Memory Service.
 
-    Returns the profile dict or None on failure.
+    Returns a normalised profile dict or None on failure.
+    On 404 (no profile extracted yet) returns None — orchestrator falls back to defaults.
     """
     if settings.mock_services:
         logger.debug("[MOCK] Returning mock profile for %s", user_id)
@@ -78,14 +101,14 @@ async def get_user_profile(user_id: str, username: str = "") -> Optional[dict[st
 
     try:
         client = _get_client()
-        resp = await client.get(f"/api/v1/users/{user_id}/profile")
+        resp = await client.get("/profile", params={"user_id": user_id})
         resp.raise_for_status()
-        return resp.json()
+        return _parse_memory_profile(resp.json(), username)
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
-            logger.info("Profile not found for %s — new user", user_id)
+            logger.info("No profile found for %s — using defaults", user_id)
             return None
-        logger.error("Profile service error for %s: %s", user_id, e)
+        logger.error("Profile fetch error for %s: %s", user_id, e)
         return None
     except Exception:
         logger.exception("Failed to fetch profile for %s", user_id)
@@ -94,19 +117,10 @@ async def get_user_profile(user_id: str, username: str = "") -> Optional[dict[st
 
 async def upsert_user_profile(user_id: str, data: dict[str, Any]) -> bool:
     """
-    Create or update user profile via PATCH.
-
-    Returns True on success.
+    Profile updates happen via POST /profile (messages-based extraction) in memory_client.
+    This stub exists for interface compatibility.
     """
     if settings.mock_services:
-        logger.debug("[MOCK] Upsert profile for %s", user_id)
         return True
-
-    try:
-        client = _get_client()
-        resp = await client.patch(f"/api/v1/users/{user_id}/profile", json=data)
-        resp.raise_for_status()
-        return True
-    except Exception:
-        logger.exception("Failed to upsert profile for %s", user_id)
-        return False
+    # Profile upsert is handled by memory_client.update_mymem0_profile (message-based)
+    return True
