@@ -4,7 +4,6 @@ from .fallback_provider import FallbackProvider
 from .generation_service import GenerationService
 from .template_manager import TemplateManager
 from .template_renderer import TemplateRenderer
-from .conversation_store_client import ConversationStoreClient
 
 __all__ = [
     "AIProviderBase",
@@ -13,5 +12,4 @@ __all__ = [
     "GenerationService",
     "TemplateManager",
     "TemplateRenderer",
-    "ConversationStoreClient",
 ]
