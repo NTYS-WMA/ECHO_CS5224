@@ -426,34 +426,6 @@ class TestGenerationRouteValidation:
         response = self.client.post("/api/v1/generation/execute", json=payload)
         assert response.status_code == 422
 
-    def test_chat_completion_missing_messages(self):
-        """POST /chat-completions should require messages."""
-        payload = {
-            "user_id": "usr_1",
-            "conversation_id": "conv_1",
-        }
-        response = self.client.post(
-            "/api/v1/generation/chat-completions", json=payload
-        )
-        assert response.status_code == 422
-
-    def test_summary_missing_messages_window(self):
-        """POST /summaries should require messages_window."""
-        payload = {
-            "user_id": "usr_1",
-            "conversation_id": "conv_1",
-            "summary_type": "memory_compaction",
-        }
-        response = self.client.post("/api/v1/generation/summaries", json=payload)
-        assert response.status_code == 422
-
-    def test_proactive_missing_relationship(self):
-        """POST /proactive-messages should require relationship."""
-        payload = {"user_id": "usr_1"}
-        response = self.client.post(
-            "/api/v1/generation/proactive-messages", json=payload
-        )
-        assert response.status_code == 422
 
 
 class TestEmbeddingRouteValidation:
@@ -577,35 +549,6 @@ class TestRequestModels:
             messages=[MessageItem(role="user", content="Hello")],
         )
         assert len(req.messages) == 1
-
-    def test_chat_completion_request_valid(self):
-        """Should accept a valid ChatCompletionRequest."""
-        from ..models.requests import ChatCompletionRequest
-
-        req = ChatCompletionRequest(
-            user_id="usr_9f2a7c41",
-            conversation_id="telegram-chat-123456789",
-            messages=[
-                {"role": "system", "content": "You are ECHO."},
-                {"role": "user", "content": "Hello"},
-            ],
-        )
-        assert req.user_id == "usr_9f2a7c41"
-        assert len(req.messages) == 2
-
-    def test_proactive_request_valid(self):
-        """Should accept a valid ProactiveMessageRequest."""
-        from ..models.requests import ProactiveMessageRequest
-
-        req = ProactiveMessageRequest(
-            user_id="usr_9f2a7c41",
-            relationship={
-                "tier": "close_friend",
-                "affinity_score": 0.74,
-                "days_inactive": 3,
-            },
-        )
-        assert req.relationship.tier == "close_friend"
 
     def test_template_register_request_valid(self):
         """Should accept a valid TemplateRegisterRequest."""

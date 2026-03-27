@@ -1,7 +1,7 @@
 """
 Client for the AI Generation Service.
 
-POST /api/v1/generation/chat-completions
+POST /api/v1/generation/execute
 
 Falls back to a simple echo-style mock when MOCK_SERVICES=true.
 """
@@ -50,6 +50,7 @@ def _mock_chat_completion(messages: list[dict]) -> dict[str, Any]:
 
     return {
         "response_id": f"gen-mock-{uuid.uuid4().hex[:6]}",
+        "template_id": "tpl_chat_completion",
         "output": [
             {
                 "type": "text",
@@ -95,6 +96,7 @@ async def generate_chat_completion(
     payload = {
         "user_id": user_id,
         "conversation_id": conversation_id,
+        "template_id": "tpl_chat_completion",
         "messages": messages,
         "generation_config": {
             "temperature": temperature or settings.ai_temperature,
@@ -105,7 +107,7 @@ async def generate_chat_completion(
 
     try:
         client = _get_client()
-        resp = await client.post("/api/v1/generation/chat-completions", json=payload)
+        resp = await client.post("/api/v1/generation/execute", json=payload)
         resp.raise_for_status()
         result = resp.json()
         logger.info(

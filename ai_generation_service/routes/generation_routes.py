@@ -1,14 +1,10 @@
 """
 API routes for the AI Generation Service.
 
-Exposes the primary template-based generation endpoint and legacy endpoints
-for backward compatibility:
+Exposes two primary endpoints:
 
-1. POST /api/v1/generation/execute            — Primary: template-based generation
-2. POST /api/v1/generation/embeddings         — Primary: text embedding
-3. POST /api/v1/generation/chat-completions   — Legacy: chat completion
-4. POST /api/v1/generation/summaries          — Legacy: summary generation
-5. POST /api/v1/generation/proactive-messages — Legacy: proactive message generation
+1. POST /api/v1/generation/execute     — Template-based text generation
+2. POST /api/v1/generation/embeddings  — Text embedding
 """
 
 import logging
@@ -16,19 +12,13 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..models.requests import (
-    ChatCompletionRequest,
     EmbeddingRequest,
-    ProactiveMessageRequest,
-    SummaryGenerationRequest,
     TemplateGenerationRequest,
 )
 from ..models.responses import (
-    ChatCompletionResponse,
     EmbeddingResponse,
     ErrorResponse,
     GenerationResponse,
-    ProactiveMessageResponse,
-    SummaryGenerationResponse,
 )
 from ..services.generation_service import GenerationError, GenerationService
 
@@ -80,7 +70,7 @@ def _handle_unexpected_error(e: Exception, correlation_id=None):
 
 
 # ------------------------------------------------------------------ #
-# 1. Primary: Template-Based Generation
+# 1. Template-Based Generation
 # ------------------------------------------------------------------ #
 
 
@@ -150,120 +140,6 @@ async def generate_embedding(
     except GenerationError as e:
         logger.error(
             "Embedding failed for user %s: [%s] %s",
-            request.user_id,
-            e.error_code,
-            str(e),
-        )
-        _handle_generation_error(e, request.correlation_id)
-    except Exception as e:
-        _handle_unexpected_error(e, request.correlation_id)
-
-
-# ------------------------------------------------------------------ #
-# 3. Legacy: Chat Completion
-# ------------------------------------------------------------------ #
-
-
-@router.post(
-    "/chat-completions",
-    response_model=ChatCompletionResponse,
-    responses={
-        500: {"model": ErrorResponse, "description": "Generation failed after all retries"},
-        503: {"model": ErrorResponse, "description": "Provider timeout or upstream unavailable (retryable)"},
-    },
-    summary="Generate a chat completion (legacy)",
-    description=(
-        "Legacy endpoint. Accepts a conversation message list and returns an "
-        "AI-generated reply. New callers should use POST /execute instead."
-    ),
-    deprecated=True,
-)
-async def chat_completion(
-    request: ChatCompletionRequest,
-    service: GenerationService = Depends(get_generation_service),
-) -> ChatCompletionResponse:
-    """Handle chat completion requests (legacy)."""
-    try:
-        return await service.chat_completion(request)
-    except GenerationError as e:
-        logger.error(
-            "Chat completion failed for user %s: [%s] %s",
-            request.user_id,
-            e.error_code,
-            str(e),
-        )
-        _handle_generation_error(e, request.correlation_id)
-    except Exception as e:
-        _handle_unexpected_error(e, request.correlation_id)
-
-
-# ------------------------------------------------------------------ #
-# 4. Legacy: Summary Generation
-# ------------------------------------------------------------------ #
-
-
-@router.post(
-    "/summaries",
-    response_model=SummaryGenerationResponse,
-    responses={
-        500: {"model": ErrorResponse, "description": "Generation failed after all retries"},
-        503: {"model": ErrorResponse, "description": "Provider timeout or upstream unavailable (retryable)"},
-    },
-    summary="Generate a conversation summary (legacy)",
-    description=(
-        "Legacy endpoint. Accepts a message window reference and generates a "
-        "compact summary. New callers should use POST /execute instead."
-    ),
-    deprecated=True,
-)
-async def generate_summary(
-    request: SummaryGenerationRequest,
-    service: GenerationService = Depends(get_generation_service),
-) -> SummaryGenerationResponse:
-    """Handle summary generation requests (legacy)."""
-    try:
-        return await service.generate_summary(request)
-    except GenerationError as e:
-        logger.error(
-            "Summary generation failed for user %s: [%s] %s",
-            request.user_id,
-            e.error_code,
-            str(e),
-        )
-        _handle_generation_error(e, request.correlation_id)
-    except Exception as e:
-        _handle_unexpected_error(e, request.correlation_id)
-
-
-# ------------------------------------------------------------------ #
-# 5. Legacy: Proactive Message Generation
-# ------------------------------------------------------------------ #
-
-
-@router.post(
-    "/proactive-messages",
-    response_model=ProactiveMessageResponse,
-    responses={
-        500: {"model": ErrorResponse, "description": "Generation failed after all retries"},
-        503: {"model": ErrorResponse, "description": "Provider timeout or upstream unavailable (retryable)"},
-    },
-    summary="Generate a proactive outreach message (legacy)",
-    description=(
-        "Legacy endpoint. Accepts relationship context and generates a "
-        "personalized check-in message. New callers should use POST /execute instead."
-    ),
-    deprecated=True,
-)
-async def generate_proactive_message(
-    request: ProactiveMessageRequest,
-    service: GenerationService = Depends(get_generation_service),
-) -> ProactiveMessageResponse:
-    """Handle proactive message generation requests (legacy)."""
-    try:
-        return await service.generate_proactive_message(request)
-    except GenerationError as e:
-        logger.error(
-            "Proactive message generation failed for user %s: [%s] %s",
             request.user_id,
             e.error_code,
             str(e),
