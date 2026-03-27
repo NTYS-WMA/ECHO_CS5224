@@ -15,7 +15,7 @@ The prompt assembly responsibility is split:
 Supported invocation patterns:
 1. Template-based: template_id + variables -> render -> execute
 2. Multi-turn chat: template_id + messages -> merge system prompt -> execute
-3. Legacy endpoints: backward-compatible wrappers that map to pattern 1 or 2.
+3. Embedding: text -> embed via provider
 """
 
 import asyncio
@@ -25,32 +25,20 @@ from typing import Any, Dict, List, Optional
 from ..config.settings import Settings
 from ..events.publisher import EventPublisher
 from ..models.requests import (
-    ChatCompletionRequest,
     EmbeddingRequest,
-    ProactiveMessageRequest,
-    SummaryGenerationRequest,
     TemplateGenerationRequest,
 )
 from ..models.responses import (
-    ChatCompletionResponse,
     EmbeddingResponse,
     GenerationResponse,
     OutputItem,
-    ProactiveMessageResponse,
-    SummaryGenerationResponse,
     UsageInfo,
 )
 from ..utils.helpers import generate_event_id, generate_response_id
-from .conversation_store_client import ConversationStoreClient
 from .provider_base import AIProviderBase, ProviderError, ProviderTimeoutError
 from .template_renderer import TemplateRenderer, TemplateRenderError
 
 logger = logging.getLogger(__name__)
-
-# Default template IDs for legacy endpoints
-DEFAULT_CHAT_TEMPLATE = "tpl_chat_completion"
-DEFAULT_SUMMARY_TEMPLATE = "tpl_memory_compaction"
-DEFAULT_PROACTIVE_TEMPLATE = "tpl_proactive_outreach"
 
 
 class GenerationService:
@@ -63,7 +51,6 @@ class GenerationService:
         primary_provider: AIProviderBase,
         fallback_provider: Optional[AIProviderBase],
         event_publisher: EventPublisher,
-        conversation_store: ConversationStoreClient,
         template_renderer: TemplateRenderer,
         settings: Settings,
     ):
@@ -74,14 +61,12 @@ class GenerationService:
             primary_provider: The primary AI provider (e.g., Bedrock/Claude).
             fallback_provider: Optional fallback AI provider.
             event_publisher: Event publisher for telemetry and failure events.
-            conversation_store: Client for retrieving conversation messages.
             template_renderer: Renderer for prompt templates.
             settings: Service configuration.
         """
         self._primary = primary_provider
         self._fallback = fallback_provider
         self._events = event_publisher
-        self._conversation_store = conversation_store
         self._renderer = template_renderer
         self._settings = settings
 

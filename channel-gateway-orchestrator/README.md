@@ -232,7 +232,7 @@ This is how the orchestrator connects to your services. Right now these are mock
 | Memory Service (MyMem0) | Semantic search for long-term memories | `POST /search` on `:18088` | `memory_client.py` |
 | Memory Service (MyMem0) | Write new memories from conversation | `POST /memories` on `:18088` | `memory_client.py` |
 | Memory Service (MyMem0) | Extract/update user profile | `POST /profile` on `:18088` | `memory_client.py` |
-| AI Generation Service | Chat completion for reply generation | `POST /api/v1/generation/chat-completions` | `ai_generation_client.py` |
+| AI Generation Service | Chat completion for reply generation | `POST /api/v1/generation/execute` | `ai_generation_client.py` |
 | Relationship Service | Get affinity score and tier | `GET /api/v1/relationships/{user_id}/context` | `relationship_client.py` |
 | User Profile Service | Get user profile and preferences | `GET /api/v1/users/{user_id}/profile` | `user_profile_client.py` |
 | Conversation Store | Persist message history | `POST /api/v1/conversations/{conversation_id}/messages` | `conversation_store_client.py` |

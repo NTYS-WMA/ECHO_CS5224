@@ -1,7 +1,7 @@
 # AI Generation Service — Assumed External Interfaces
 
-**Version**: 2.1
-**Last Updated**: 2026-03-24
+**Version**: 2.2
+**Last Updated**: 2026-03-27
 **Status**: Per-section statuses below. Last reviewed: 2026-03-24.
 
 ---
@@ -12,60 +12,7 @@ This document lists all external service interfaces that the AI Generation Servi
 
 ---
 
-## 1. Conversation Persistence Store — Message Window Retrieval
-
-**Owner**: Platform / Data Team
-**Status**: ⚠️ **Assumed Interface** — HTTP client is fully implemented in `services/conversation_store_client.py`, but the target endpoint has not been confirmed by the owning team. Currently no code path triggers this in production (the `/summaries` legacy endpoint that uses it has no active callers).
-
-The AI Generation Service calls this endpoint when processing summary generation requests (legacy `POST /api/v1/generation/summaries` or via `execute` with `tpl_memory_compaction`). The summary request specifies a message window by ID range, and the service needs to retrieve the actual message content to build the summarization prompt.
-
-**Assumed Endpoint**:
-
-```
-GET /api/v1/conversations/{conversation_id}/messages?from_id={from_message_id}&to_id={to_message_id}
-```
-
-**Assumed Base URL**: Configured via `AI_GEN_CONVERSATION_STORE_BASE_URL` environment variable.
-
-**Assumed Request**:
-
-| Parameter | Location | Type | Required | Description |
-|-----------|----------|------|----------|-------------|
-| `conversation_id` | path | string | yes | Conversation identifier |
-| `from_id` | query | string | yes | Starting message ID (inclusive) |
-| `to_id` | query | string | yes | Ending message ID (inclusive) |
-
-**Assumed Response** `200 OK`:
-
-```json
-{
-  "messages": [
-    {
-      "message_id": "msg-601",
-      "role": "user",
-      "content": "I went for a run this evening.",
-      "timestamp": "2026-03-11T14:50:00Z"
-    },
-    {
-      "message_id": "msg-602",
-      "role": "assistant",
-      "content": "That's great! How did it go?",
-      "timestamp": "2026-03-11T14:50:03Z"
-    }
-  ]
-}
-```
-
-**Notes**:
-
-- Messages should be returned in chronological order.
-- The response must include at least `role` and `content` fields per message.
-- If the window contains no messages, an empty `messages` array should be returned.
-- The architecture spec defines `POST /api/v1/conversations/{conversation_id}/messages` for writing messages. This read endpoint is assumed but not explicitly defined in the spec.
-
----
-
-## 2. Internal Asynchronous Messaging Layer — Event Publishing
+## 1. Internal Asynchronous Messaging Layer — Event Publishing
 
 **Owner**: Platform / Infrastructure Team
 **Status**: 🔶 **Stub** — Event schemas and publisher wrapper are implemented (`events/publisher.py`). The `_publish()` method logs events but does not send to a real broker. Broker technology decision is pending.
@@ -103,7 +50,7 @@ await queue.put({"topic": topic, "payload": json_payload})
 
 ---
 
-## 3. Amazon Bedrock — Converse API
+## 2. Amazon Bedrock — Converse API
 
 **Owner**: AWS / External
 **Status**: ✅ **Implemented** — `services/bedrock_provider.py` fully implements the Converse API (text generation) and InvokeModel API (embeddings) with lazy client initialization, async executor wrapping, timeout handling, and error mapping. Requires `boto3` and valid AWS credentials (IAM role or env vars) at deploy time.
@@ -179,7 +126,7 @@ response = bedrock_client.invoke_model(
 
 ---
 
-## 4. Template Persistence (Future Enhancement)
+## 3. Template Persistence (Future Enhancement)
 
 **Owner**: AI Generation Service Team
 **Status**: ✅ **Implemented (Local Only)** — Templates persist to local JSON files and in-memory store via `services/template_manager.py`. Functional for single-instance deployment. Multi-instance / production deployment requires a shared durable backend (not yet implemented).
@@ -216,3 +163,4 @@ Currently, prompt templates are stored in-memory and persisted as JSON files on 
 | 2026-03-23 | v1.0 — Initial assumed interfaces documented |
 | 2026-03-23 | v2.0 — Added template persistence future enhancement; updated for template-based architecture |
 | 2026-03-24 | v2.1 — Replaced blanket "TO BE UPDATED" with per-section implementation statuses; Bedrock marked as fully implemented; added caller activity notes |
+| 2026-03-27 | v2.2 — Removed Conversation Store assumed interface (legacy summaries endpoint removed); added Bedrock embedding (InvokeModel) interface; renumbered sections |

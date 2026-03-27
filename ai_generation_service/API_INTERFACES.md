@@ -13,8 +13,8 @@
 2. [Access Information](#2-access-information)
 3. [Template Management APIs](#3-template-management-apis)
 4. [Generation APIs](#4-generation-apis)
-   - [4.2 Embedding API](#42-post-apiv1generationembeddings--generate-embedding)
-   - [4.5 Migration Guide](#45-migration-guide-legacy-endpoints--execute)
+   - [4.1 Execute (text generation)](#41-post-apiv1generationexecute--execute-generation-primary)
+   - [4.2 Embeddings](#42-post-apiv1generationembeddings--generate-embedding)
 5. [Health and Readiness](#5-health-and-readiness)
 6. [Published Events](#6-published-events)
 7. [Error Handling](#7-error-handling)
@@ -352,7 +352,7 @@ Generate a dense vector embedding for the given input text. Uses the configured 
 
 ---
 
-### 4.3 Active Legacy: POST /api/v1/generation/chat-completions
+The following legacy endpoints have been removed as all callers have migrated to `/execute`:
 
 > **Status**: ✅ Implemented and actively called by **Channel Gateway Orchestrator** (`ai_generation_client.py`). Maintain until Orchestrator migrates to `/execute`.
 
@@ -695,9 +695,7 @@ Published when a generation request fails after all retry and fallback attempts.
 
 > **Note**: The `operation` field reflects the code path used:
 > - Via `/execute`: `"execute:<template_id>"` (e.g., `"execute:tpl_chat_completion"`)
-> - Via legacy `/chat-completions`: `"chat_completion"`
-> - Via legacy `/summaries`: `"summary_generation"`
-> - Via legacy `/proactive-messages`: `"proactive_message"`
+> - Via `/embeddings`: `"embedding"`
 
 ---
 
@@ -711,7 +709,6 @@ Published when a generation request fails after all retry and fallback attempts.
 | 500 | `PROVIDER_ERROR` | AI provider returned an error after all retries | No |
 | 500 | `INTERNAL_ERROR` | Unexpected server error | No |
 | 503 | `PROVIDER_TIMEOUT` | AI provider timed out after all retries | Yes |
-| 503 | `CONVERSATION_STORE_UNAVAILABLE` | Failed to retrieve conversation messages from store | Yes |
 
 **Error Response Body**:
 

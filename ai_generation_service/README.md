@@ -76,7 +76,6 @@ ai_generation_service/
 │   ├── fallback_provider.py           # OpenAI-compatible fallback provider
 │   ├── template_manager.py            # Template CRUD and storage
 │   ├── template_renderer.py           # Template rendering engine
-│   ├── conversation_store_client.py   # Client for Conversation Persistence Store
 │   └── generation_service.py          # Core execution engine with retry/fallback
 ├── events/
 │   ├── __init__.py
@@ -86,7 +85,7 @@ ai_generation_service/
 │   └── helpers.py                     # ID generation and utility functions
 └── tests/
     ├── __init__.py
-    └── test_generation_routes.py      # Unit tests (37 tests)
+    └── test_generation_routes.py      # Unit tests
 ```
 
 ---
@@ -106,11 +105,8 @@ ai_generation_service/
 
 | Method | Endpoint | Description | Status |
 |--------|----------|-------------|--------|
-| POST | `/api/v1/generation/execute` | **Primary** — template_id + variables/messages | ✅ Implemented |
-| POST | `/api/v1/generation/embeddings` | **Primary** — text embedding | ✅ Implemented |
-| POST | `/api/v1/generation/chat-completions` | Legacy — chat completion | ✅ Active (called by Orchestrator) |
-| POST | `/api/v1/generation/summaries` | Legacy — summary generation | ⚠️ Implemented, no callers |
-| POST | `/api/v1/generation/proactive-messages` | Legacy — proactive message | ⚠️ Implemented, no callers |
+| POST | `/api/v1/generation/execute` | Template-based text generation | ✅ Implemented |
+| POST | `/api/v1/generation/embeddings` | Text embedding | ✅ Implemented |
 
 ### Health
 
@@ -329,7 +325,6 @@ All configuration is loaded from environment variables with the `AI_GEN_` prefix
 | `AI_GEN_BEDROCK_EMBEDDING_MODEL_ID` | `amazon.titan-embed-text-v2:0` | Bedrock embedding model identifier |
 | `AI_GEN_BEDROCK_TIMEOUT_SECONDS` | `30` | Request timeout |
 | `AI_GEN_EVENT_BROKER_URL` | `redis://localhost:6379/0` | Event broker connection URL |
-| `AI_GEN_CONVERSATION_STORE_BASE_URL` | `http://localhost:8010` | Conversation Persistence Store URL |
 
 See `config/settings.py` for the full list of configurable parameters.
 
@@ -401,7 +396,7 @@ uvicorn ai_generation_service.app:app --host 0.0.0.0 --port 8003
 ### 4. Run tests
 
 ```bash
-# 43 unit tests — no AWS credentials required (providers are mocked)
+# 38 unit tests — no AWS credentials required (providers are mocked)
 pytest ai_generation_service/tests/ -v
 ```
 
@@ -412,7 +407,6 @@ pytest ai_generation_service/tests/ -v
 | Service | Interface Type | Status |
 |---------|---------------|--------|
 | Amazon Bedrock | AWS SDK (Converse API + InvokeModel) | ✅ Implemented (`bedrock_provider.py`). Requires boto3 + AWS credentials at deploy time. Converse API for generation, InvokeModel for embeddings |
-| Conversation Persistence Store | HTTP API (read messages) | 🔶 Client implemented (`conversation_store_client.py`), target endpoint assumed/unconfirmed |
 | Internal Messaging Layer | Event publish | 🔶 Stub — logs only, no broker connected (`events/publisher.py`) |
 
 For details on assumed interfaces, see [ASSUMED_INTERFACES.md](./ASSUMED_INTERFACES.md).
@@ -425,7 +419,4 @@ For details on assumed interfaces, see [ASSUMED_INTERFACES.md](./ASSUMED_INTERFA
 |---|------|---------------|------------|----------|
 | 1 | Connect event publisher to real broker | Stub (log only) | Infra team to decide broker technology (Redis Streams / RabbitMQ / SQS) | High |
 | 2 | Add provider health check to `/ready` | Stub (always returns ready) | None | Medium |
-| 3 | Migrate Orchestrator to `/execute` endpoint | Orchestrator still uses `/chat-completions` | Orchestrator team coordination | Medium |
-| 4 | Confirm Conversation Store API contract | Client implemented, endpoint assumed | Platform/Data team to confirm endpoint | Medium |
-| 5 | Migrate template persistence to shared storage | Local JSON files | Choose storage backend (DynamoDB / MySQL / S3) | Low (single-instance works) |
-| 6 | Remove unused legacy endpoints | `/summaries`, `/proactive-messages` have no callers | Confirm no planned callers before removal | Low |
+| 3 | Migrate template persistence to shared storage | Local JSON files | Choose storage backend (DynamoDB / MySQL / S3) | Low (single-instance works) |
