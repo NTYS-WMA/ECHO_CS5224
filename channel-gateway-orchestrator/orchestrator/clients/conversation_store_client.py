@@ -1,10 +1,18 @@
 """
-Client for the Conversation Persistence Store.
+Client for conversation message persistence.
 
-POST /api/v1/conversations/{conversation_id}/messages
+Messages are written to db-manager (port 18087) which stores them in PostgreSQL.
+This makes conversation history persistent across container restarts.
 
-Falls back to an in-memory store when MOCK_SERVICES=true, which also
-serves as the short-term context source until the real store is wired up.
+The in-memory store is always kept in sync as a same-session fallback
+and for the summarization threshold counter.
+
+db-manager endpoints used:
+  PUT /relationship-db/users/{user_id}   — ensure user exists (FK requirement)
+  POST /relationship-db/messages         — insert a message
+  GET  /relationship-db/messages         — retrieve recent messages by user_id
+
+Falls back to in-memory when MOCK_SERVICES=true or db-manager is unavailable.
 """
 
 import logging
@@ -19,8 +27,7 @@ logger = logging.getLogger(__name__)
 
 _http_client: httpx.AsyncClient | None = None
 
-# In-Memory Store (mock mode + short-term context)
-# conversation_id → list of message dicts
+# In-memory store — always written; serves short-term context + summarization counter
 _in_memory_store: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
 
@@ -28,13 +35,42 @@ def _get_client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is None or _http_client.is_closed:
         _http_client = httpx.AsyncClient(
-            base_url=settings.conversation_store_url,
+            base_url=settings.db_manager_url,
             timeout=10.0,
         )
     return _http_client
 
 
-#Public API
+# Public API
+
+async def ensure_user_registered(
+    user_id: str,
+    telegram_id: Optional[int] = None,
+    first_name: Optional[str] = None,
+) -> None:
+    """
+    Upsert the user row in db-manager before any messages are inserted.
+
+    The messages table has a foreign key on users.id, so the user row must
+    exist first or the message insert will fail with an IntegrityError.
+    Failures here are non-fatal — the message insert will surface the error.
+    """
+    if settings.mock_services:
+        return
+
+    try:
+        client = _get_client()
+        payload: dict[str, Any] = {}
+        if telegram_id is not None:
+            payload["telegram_id"] = telegram_id
+        if first_name:
+            payload["first_name"] = first_name
+        resp = await client.put(f"/relationship-db/users/{user_id}", json=payload)
+        resp.raise_for_status()
+        logger.debug("Upserted user %s in db-manager", user_id)
+    except Exception:
+        logger.warning("Failed to upsert user %s in db-manager (non-fatal)", user_id)
+
 
 async def persist_messages(
     conversation_id: str,
@@ -44,40 +80,52 @@ async def persist_messages(
     correlation_id: str = "",
 ) -> bool:
     """
-    Persist conversation messages (user + assistant turns).
+    Persist conversation messages to db-manager (PostgreSQL) and the in-memory store.
 
-    In mock mode, stores in memory so we can retrieve recent context.
+    In mock mode, writes only to the in-memory store.
     """
-    # Always store in memory for short-term context retrieval
+    # Always write to memory for same-session short-term context and length tracking
     _in_memory_store[conversation_id].extend(messages)
 
     if settings.mock_services:
         logger.debug(
-            "[MOCK] Persisted %d message(s) for conversation %s (in-memory, total=%d)",
+            "[MOCK] Persisted %d message(s) for conversation %s (in-memory only, total=%d)",
             len(messages),
             conversation_id,
             len(_in_memory_store[conversation_id]),
         )
         return True
 
-    payload = {
-        "user_id": user_id,
-        "channel": channel,
-        "messages": messages,
-        "correlation_id": correlation_id,
-    }
-
+    success = True
     try:
         client = _get_client()
-        resp = await client.post(
-            f"/api/v1/conversations/{conversation_id}/messages",
-            json=payload,
+        for msg in messages:
+            payload: dict[str, Any] = {
+                "user_id": user_id,
+                "role": msg.get("role"),
+                "content": msg.get("content"),
+                "is_proactive": False,
+            }
+            ts = msg.get("timestamp")
+            if ts:
+                payload["created_at"] = ts
+
+            resp = await client.post("/relationship-db/messages", json=payload)
+            resp.raise_for_status()
+
+        logger.debug(
+            "Persisted %d message(s) for user %s to db-manager",
+            len(messages),
+            user_id,
         )
-        resp.raise_for_status()
-        return True
     except Exception:
-        logger.exception("Failed to persist messages for %s", conversation_id)
-        return False
+        logger.exception(
+            "Failed to persist messages to db-manager for user %s (in-memory fallback active)",
+            user_id,
+        )
+        success = False
+
+    return success
 
 
 async def get_recent_messages(
@@ -85,15 +133,16 @@ async def get_recent_messages(
     limit: int = 12,
 ) -> list[dict[str, Any]]:
     """
-    Retrieve recent messages for short-term context.
+    Retrieve recent messages for short-term context from the in-memory store.
 
-    In mock mode (or when the real store isn't available), uses the
-    in-memory store which captures everything persisted this session.
+    Messages are persisted to db-manager for the relationship service's scoring
+    cycle, but short-term context is served from memory to avoid adding latency
+    to the AI generation path.
     """
     stored = _in_memory_store.get(conversation_id, [])
     recent = stored[-limit:] if stored else []
     logger.debug(
-        "Retrieved %d recent messages for %s (in-memory store has %d total)",
+        "Retrieved %d recent messages for %s (in-memory, total stored=%d)",
         len(recent),
         conversation_id,
         len(stored),

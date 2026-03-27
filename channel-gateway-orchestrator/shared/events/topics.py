@@ -30,6 +30,7 @@ AI_GENERATION_COMPLETED = "ai.generation.completed"
 MEDIA_ASSET_READY = "media.asset.ready"
 MEDIA_GENERATION_FAILED = "media.generation.failed"
 
-#Proactive Engagement
-PROACTIVE_SCAN_REQUESTED = "proactive.scan.requested"
-PROACTIVE_DISPATCH_COMPLETED = "proactive.dispatch.completed"
+#Cron-triggered events (published by the Cron Service as time triggers)
+# These reuse the domain topics above (e.g. RELATIONSHIP_DECAY_REQUESTED,
+# MEMORY_COMPACTION_REQUESTED).  The Cron Service publishes directly to
+# the domain topic — no cron-specific wrapper topics needed.

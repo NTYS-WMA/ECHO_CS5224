@@ -289,6 +289,270 @@ class GenerationService:
         )
 
     # ================================================================== #
+    # LEGACY INTERFACES (backward compatibility)
+    # ================================================================== #
+
+    async def chat_completion(
+        self, request: ChatCompletionRequest
+    ) -> ChatCompletionResponse:
+        """
+        Handle a chat completion request (legacy endpoint).
+
+        Maps to the template-based execution engine using the chat template.
+        """
+        template_id = request.template_id or DEFAULT_CHAT_TEMPLATE
+
+        try:
+            messages, defaults = self._renderer.render_with_messages(
+                template_id=template_id,
+                messages=[m.model_dump() for m in request.messages],
+            )
+        except TemplateRenderError as e:
+            raise GenerationError(
+                error_code="TEMPLATE_RENDER_ERROR",
+                message=str(e),
+                retryable=False,
+            )
+
+        temperature = self._resolve_param(
+            request.generation_config.temperature if request.generation_config else None,
+            defaults.temperature if defaults else None,
+            self._settings.DEFAULT_TEMPERATURE,
+        )
+        max_tokens = self._resolve_param(
+            request.generation_config.max_tokens if request.generation_config else None,
+            defaults.max_tokens if defaults else None,
+            self._settings.DEFAULT_MAX_TOKENS,
+        )
+        stop_sequences = (
+            request.generation_config.stop_sequences
+            if request.generation_config
+            else None
+        )
+
+        provider_response = await self._invoke_with_retry_and_fallback(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stop_sequences=stop_sequences,
+            operation="chat_completion",
+            user_id=request.user_id,
+            correlation_id=request.correlation_id,
+        )
+
+        response = ChatCompletionResponse(
+            response_id=generate_response_id(),
+            output=[OutputItem(type="text", content=provider_response.content)],
+            model=provider_response.model,
+            usage=UsageInfo(
+                input_tokens=provider_response.input_tokens,
+                output_tokens=provider_response.output_tokens,
+            ),
+        )
+
+        await self._publish_completed_event(
+            operation="chat_completion",
+            user_id=request.user_id,
+            model=provider_response.model,
+            usage={
+                "input_tokens": provider_response.input_tokens,
+                "output_tokens": provider_response.output_tokens,
+            },
+            correlation_id=request.correlation_id,
+        )
+
+        return response
+
+    async def generate_summary(
+        self, request: SummaryGenerationRequest
+    ) -> SummaryGenerationResponse:
+        """
+        Handle a summary generation request (legacy endpoint).
+
+        Retrieves conversation messages, then maps to template-based execution.
+        """
+        try:
+            conversation_messages = (
+                await self._conversation_store.get_messages_by_window(
+                    conversation_id=request.conversation_id,
+                    from_message_id=request.messages_window.from_message_id,
+                    to_message_id=request.messages_window.to_message_id,
+                )
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to retrieve conversation messages for summarization: %s",
+                str(e),
+            )
+            raise GenerationError(
+                error_code="CONVERSATION_STORE_UNAVAILABLE",
+                message=f"Failed to retrieve conversation messages: {str(e)}",
+                retryable=True,
+            )
+
+        # Format conversation for the template variable
+        conversation_text = "\n".join(
+            f"[{msg.get('role', 'unknown')}]: {msg.get('content', '')}"
+            for msg in conversation_messages
+        )
+
+        # Assemble the full user prompt (business-layer responsibility)
+        user_prompt = (
+            f"Please summarize the following conversation into a compact memory entry.\n"
+            f"Summary type: {request.summary_type}\n\n"
+            f"Conversation:\n{conversation_text}\n\n"
+            f"Provide a concise summary capturing the user's key preferences, "
+            f"emotional state, and important facts."
+        )
+
+        template_id = request.template_id or DEFAULT_SUMMARY_TEMPLATE
+
+        try:
+            messages, defaults = self._renderer.render(
+                template_id=template_id,
+                variables={"user_prompt": user_prompt},
+            )
+        except TemplateRenderError as e:
+            raise GenerationError(
+                error_code="TEMPLATE_RENDER_ERROR",
+                message=str(e),
+                retryable=False,
+            )
+
+        temperature = self._resolve_param(
+            None,
+            defaults.temperature if defaults else None,
+            self._settings.SUMMARY_TEMPERATURE,
+        )
+        max_tokens = self._resolve_param(
+            None,
+            defaults.max_tokens if defaults else None,
+            self._settings.SUMMARY_MAX_TOKENS,
+        )
+
+        provider_response = await self._invoke_with_retry_and_fallback(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stop_sequences=None,
+            operation="summary_generation",
+            user_id=request.user_id,
+            correlation_id=request.correlation_id,
+        )
+
+        response = SummaryGenerationResponse(
+            content=provider_response.content,
+            model=provider_response.model,
+            usage=UsageInfo(
+                input_tokens=provider_response.input_tokens,
+                output_tokens=provider_response.output_tokens,
+            ),
+        )
+
+        await self._publish_completed_event(
+            operation="summary_generation",
+            user_id=request.user_id,
+            model=provider_response.model,
+            usage={
+                "input_tokens": provider_response.input_tokens,
+                "output_tokens": provider_response.output_tokens,
+            },
+            correlation_id=request.correlation_id,
+        )
+
+        return response
+
+    async def generate_proactive_message(
+        self, request: ProactiveMessageRequest
+    ) -> ProactiveMessageResponse:
+        """
+        Handle a proactive message generation request (legacy endpoint).
+
+        Assembles the context block and maps to template-based execution.
+        """
+        # Build context block — this is the business-layer assembly that
+        # will eventually move to the Cron Service caller
+        context_parts = [
+            f"Relationship tier: {request.relationship.tier}",
+            f"Affinity score: {request.relationship.affinity_score:.2f}",
+            f"Days since last interaction: {request.relationship.days_inactive}",
+            f"Desired tone: {request.constraints.tone if request.constraints and request.constraints.tone else 'friendly'}",
+        ]
+        if request.context and request.context.timezone:
+            context_parts.append(f"User timezone: {request.context.timezone}")
+        if request.context and request.context.recent_summary:
+            context_parts.append(
+                f"Recent context about the user: {request.context.recent_summary}"
+            )
+        context_block = "\n".join(context_parts)
+
+        # Assemble the full user prompt (business-layer responsibility)
+        user_prompt = (
+            f"Based on the following context, compose a short, natural check-in "
+            f"message to re-engage this user. The message should feel genuine "
+            f"and not automated.\n\n{context_block}\n\n"
+            f"Generate only the message text, nothing else."
+        )
+
+        template_id = request.template_id or DEFAULT_PROACTIVE_TEMPLATE
+
+        try:
+            messages, defaults = self._renderer.render(
+                template_id=template_id,
+                variables={"user_prompt": user_prompt},
+            )
+        except TemplateRenderError as e:
+            raise GenerationError(
+                error_code="TEMPLATE_RENDER_ERROR",
+                message=str(e),
+                retryable=False,
+            )
+
+        max_tokens = self._resolve_param(
+            request.constraints.max_tokens if request.constraints else None,
+            defaults.max_tokens if defaults else None,
+            self._settings.PROACTIVE_MAX_TOKENS,
+        )
+        temperature = self._resolve_param(
+            None,
+            defaults.temperature if defaults else None,
+            self._settings.PROACTIVE_TEMPERATURE,
+        )
+
+        provider_response = await self._invoke_with_retry_and_fallback(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stop_sequences=None,
+            operation="proactive_message",
+            user_id=request.user_id,
+            correlation_id=request.correlation_id,
+        )
+
+        response = ProactiveMessageResponse(
+            response_id=generate_response_id(),
+            output=[OutputItem(type="text", content=provider_response.content)],
+            model=provider_response.model,
+            usage=UsageInfo(
+                input_tokens=provider_response.input_tokens,
+                output_tokens=provider_response.output_tokens,
+            ),
+        )
+
+        await self._publish_completed_event(
+            operation="proactive_message",
+            user_id=request.user_id,
+            model=provider_response.model,
+            usage={
+                "input_tokens": provider_response.input_tokens,
+                "output_tokens": provider_response.output_tokens,
+            },
+            correlation_id=request.correlation_id,
+        )
+
+        return response
+
+    # ================================================================== #
     # Retry and Fallback Logic
     # ================================================================== #
 

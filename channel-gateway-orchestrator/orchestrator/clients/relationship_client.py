@@ -69,8 +69,16 @@ async def get_relationship_context(user_id: str) -> Optional[dict[str, Any]]:
         return resp.json()
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
-            logger.info("No relationship record for %s — new user", user_id)
-            return _mock_relationship(user_id)  # default for new users
+            logger.info("No relationship record for %s — treating as acquaintance", user_id)
+            return {
+                "user_id": user_id,
+                "affinity_score": 0.0,
+                "tier": "acquaintance",
+                "interaction_count": 0,
+                "last_interaction_at": None,
+                "decay_state": {"last_decay_at": None, "days_inactive": 0},
+                "updated_at": None,
+            }
         logger.error("Relationship service error for %s: %s", user_id, e)
         return None
     except Exception:

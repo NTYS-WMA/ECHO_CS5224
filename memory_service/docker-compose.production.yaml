@@ -1,0 +1,87 @@
+services:
+  postgres:
+    image: ankane/pgvector:v0.5.1
+    restart: unless-stopped
+    shm_size: "128mb"
+    networks:
+      - mem0_network
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-d", "postgres", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  mongodb:
+    image: mongo:7.0
+    container_name: mem0-mongodb
+    restart: on-failure
+    networks:
+      - mem0_network
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=mongo
+      - MONGO_INITDB_ROOT_PASSWORD=mongo
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - mongodb_data:/data/db
+
+  mem0-service:
+    image: mem0-service:amd64
+    restart: unless-stopped
+    container_name: mem0-api
+    ports:
+      - "18088:8000"
+    environment:
+      # API Keys
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      # VolcEngine DeepSeek
+      - VOLCENGINE_DEEPSEEK_API_KEY=${VOLCENGINE_DEEPSEEK_API_KEY}
+      - VOLCENGINE_DEEPSEEK_ENDPOINT_ID=${VOLCENGINE_DEEPSEEK_ENDPOINT_ID}
+      - VOLCENGINE_DEEPSEEK_BASE_URL=${VOLCENGINE_DEEPSEEK_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DOUBAO_API_KEY=${DOUBAO_API_KEY}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+
+      # PostgreSQL
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_COLLECTION=memories
+
+      # MongoDB
+      - MONGODB_URI=mongodb://mongo:mongo@mongodb:27017/
+      - MONGODB_DATABASE=mem0
+
+      # other
+      - HISTORY_DB_PATH=/app/history/history.db
+      - EMBEDDING_MODEL_DIMS=1536
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./history:/app/history
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    networks:
+      - mem0_network
+
+volumes:
+  postgres_data:
+    driver: local
+  mongodb_data:
+    driver: local
+
+networks:
+  mem0_network:
+    driver: bridge

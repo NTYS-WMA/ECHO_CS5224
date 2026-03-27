@@ -115,10 +115,10 @@ async def _assemble_context(event: dict[str, Any]) -> OrchestrationContext:
             display_name=profile_data.get("display_name", username or "User"),
             language=profile_data.get("language", "en"),
             timezone=profile_data.get("timezone", "UTC"),
-            tone=profile_data.get("preferences", {}).get("tone", "friendly"),
-            interests=profile_data.get("preferences", {}).get("interests", []),
-            onboarding_state=profile_data.get("onboarding", {}).get("state", "completed"),
-            consent_personalization=profile_data.get("consent", {}).get("personalization", True),
+            tone=profile_data.get("tone", "friendly"),
+            interests=profile_data.get("interests", []),
+            onboarding_state=profile_data.get("onboarding_state", "completed"),
+            consent_personalization=profile_data.get("consent_personalization", True),
         )
     elif isinstance(profile_data, Exception):
         logger.warning("Profile fetch failed, using defaults: %s", profile_data)
@@ -258,6 +258,21 @@ async def handle_inbound_message(event: dict[str, Any]) -> None:
     logger.info(
         "Orchestrating reply — event=%s user=%s conv=%s msg='%s'",
         event_id, user_id, conversation_id, message_content[:80],
+    )
+
+    # 0. Ensure user exists in db-manager (required before inserting messages)
+    external_user_id = event.get("external_user_id", "")
+    telegram_id: int | None = None
+    if ":" in external_user_id:
+        try:
+            telegram_id = int(external_user_id.split(":")[-1])
+        except ValueError:
+            pass
+    first_name = event.get("context", {}).get("username", "")
+    await conversation_store_client.ensure_user_registered(
+        user_id=user_id,
+        telegram_id=telegram_id,
+        first_name=first_name,
     )
 
     # 1. Persist inbound user message

@@ -1,0 +1,82 @@
+services:
+  qdrant:
+    image: qdrant/qdrant
+    container_name: mem0-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"  # Qdrant内置Web UI
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    networks:
+      - mem0_network
+    restart: unless-stopped
+
+  mem0-service:
+    build:
+      context: .
+      dockerfile: ./server/Dockerfile
+    container_name: mem0-api
+    ports:
+      - "18088:8000"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - QDRANT_COLLECTION_NAME=memories
+      - HISTORY_DB_PATH=/app/history/history.db
+    volumes:
+      - ./history:/app/history
+    depends_on:
+      - qdrant
+    networks:
+      - mem0_network
+    restart: unless-stopped
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+
+  # SQLite 数据库查看工具 (可选)
+  sqlite-web:
+    image: coleifer/sqlite-web
+    platform: linux/amd64  # 指定平台兼容ARM64
+    container_name: mem0-sqlite-web
+    ports:
+      - "18089:8080"
+    volumes:
+      - ./history:/data
+    command: ["sqlite_web", "/data/history.db", "--host", "0.0.0.0", "--port", "8080"]
+    depends_on:
+      - mem0-service
+    networks:
+      - mem0_network
+    restart: unless-stopped
+
+#  neo4j:
+#    image: neo4j:5.26.4
+#    networks:
+#      - mem0_network
+#    healthcheck:
+#      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "mem0graph", "RETURN 1"]
+#      interval: 10s
+#      timeout: 10s
+#      retries: 20
+#      start_period: 90s
+#    ports:
+#      - "8474:7474" # HTTP
+#      - "8687:7687" # Bolt
+#    volumes:
+#      - neo4j_data:/data
+#    environment:
+#      - NEO4J_AUTH=neo4j/mem0graph
+#      - NEO4J_PLUGINS=["apoc"]  # Add this line to install APOC
+#      - NEO4J_apoc_export_file_enabled=true
+#      - NEO4J_apoc_import_file_enabled=true
+#      - NEO4J_apoc_import_file_use__neo4j__config=true
+
+volumes:
+  qdrant_storage:
+    driver: local
+  neo4j_data:
+
+networks:
+  mem0_network:
+    driver: bridge
