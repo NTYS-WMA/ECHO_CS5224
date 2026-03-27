@@ -25,13 +25,19 @@ from typing import Any, Dict, List, Optional
 from ..config.settings import Settings
 from ..events.publisher import EventPublisher
 from ..models.requests import (
+    ChatCompletionRequest,
     EmbeddingRequest,
+    ProactiveMessageRequest,
+    SummaryGenerationRequest,
     TemplateGenerationRequest,
 )
 from ..models.responses import (
+    ChatCompletionResponse,
     EmbeddingResponse,
     GenerationResponse,
     OutputItem,
+    ProactiveMessageResponse,
+    SummaryGenerationResponse,
     UsageInfo,
 )
 from ..utils.helpers import generate_event_id, generate_response_id
@@ -39,6 +45,12 @@ from .provider_base import AIProviderBase, ProviderError, ProviderTimeoutError
 from .template_renderer import TemplateRenderer, TemplateRenderError
 
 logger = logging.getLogger(__name__)
+
+# Default template IDs for legacy endpoints.
+# These correspond to preset templates in the prompt_templates/ directory.
+DEFAULT_CHAT_TEMPLATE = "tpl_chat_completion"
+DEFAULT_SUMMARY_TEMPLATE = "tpl_memory_compaction"
+DEFAULT_PROACTIVE_TEMPLATE = "tpl_proactive_outreach"
 
 
 class GenerationService:
@@ -369,38 +381,23 @@ class GenerationService:
         """
         Handle a summary generation request (legacy endpoint).
 
-        Retrieves conversation messages, then maps to template-based execution.
+        NOTE: This legacy endpoint no longer fetches conversation messages
+        internally. The caller (Memory Service) must provide the conversation
+        content via the messages_window identifiers, and the actual message
+        retrieval is the caller's responsibility. This method now constructs
+        the summary prompt from the request metadata and delegates to the
+        template-based execution engine.
         """
-        try:
-            conversation_messages = (
-                await self._conversation_store.get_messages_by_window(
-                    conversation_id=request.conversation_id,
-                    from_message_id=request.messages_window.from_message_id,
-                    to_message_id=request.messages_window.to_message_id,
-                )
-            )
-        except Exception as e:
-            logger.error(
-                "Failed to retrieve conversation messages for summarization: %s",
-                str(e),
-            )
-            raise GenerationError(
-                error_code="CONVERSATION_STORE_UNAVAILABLE",
-                message=f"Failed to retrieve conversation messages: {str(e)}",
-                retryable=True,
-            )
-
-        # Format conversation for the template variable
-        conversation_text = "\n".join(
-            f"[{msg.get('role', 'unknown')}]: {msg.get('content', '')}"
-            for msg in conversation_messages
-        )
-
-        # Assemble the full user prompt (business-layer responsibility)
+        # Build user prompt from request metadata.
+        # The caller is responsible for providing conversation content via
+        # the unified /execute endpoint. This legacy path constructs a
+        # prompt from the available request fields.
         user_prompt = (
-            f"Please summarize the following conversation into a compact memory entry.\n"
-            f"Summary type: {request.summary_type}\n\n"
-            f"Conversation:\n{conversation_text}\n\n"
+            f"Please summarize the conversation into a compact memory entry.\n"
+            f"Summary type: {request.summary_type}\n"
+            f"Conversation ID: {request.conversation_id}\n"
+            f"Message range: {request.messages_window.from_message_id} "
+            f"to {request.messages_window.to_message_id}\n\n"
             f"Provide a concise summary capturing the user's key preferences, "
             f"emotional state, and important facts."
         )
@@ -422,12 +419,12 @@ class GenerationService:
         temperature = self._resolve_param(
             None,
             defaults.temperature if defaults else None,
-            self._settings.SUMMARY_TEMPERATURE,
+            self._settings.DEFAULT_TEMPERATURE,
         )
         max_tokens = self._resolve_param(
             None,
             defaults.max_tokens if defaults else None,
-            self._settings.SUMMARY_MAX_TOKENS,
+            self._settings.DEFAULT_MAX_TOKENS,
         )
 
         provider_response = await self._invoke_with_retry_and_fallback(
@@ -511,12 +508,12 @@ class GenerationService:
         max_tokens = self._resolve_param(
             request.constraints.max_tokens if request.constraints else None,
             defaults.max_tokens if defaults else None,
-            self._settings.PROACTIVE_MAX_TOKENS,
+            self._settings.DEFAULT_MAX_TOKENS,
         )
         temperature = self._resolve_param(
             None,
             defaults.temperature if defaults else None,
-            self._settings.PROACTIVE_TEMPERATURE,
+            self._settings.DEFAULT_TEMPERATURE,
         )
 
         provider_response = await self._invoke_with_retry_and_fallback(
