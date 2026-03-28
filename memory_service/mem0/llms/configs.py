@@ -28,6 +28,7 @@ class LlmConfig(BaseModel):
             "lmstudio",
             "vllm",
             "langchain",
+            "generation_service",
         ):
             return v
         else:
