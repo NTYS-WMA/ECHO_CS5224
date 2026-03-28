@@ -85,3 +85,61 @@ class ProfileRepository:
             {"$set": {"user_id": user_id, **additional}},
             upsert=True,
         )
+
+    async def delete_basic_profile(self, session: AsyncSession, user_id: str) -> int:
+        query = text(
+            """
+            DELETE FROM user_profile.user_profile
+            WHERE user_id = :user_id
+            """
+        )
+        result = await session.execute(query, {"user_id": user_id})
+        return result.rowcount or 0
+
+    async def delete_additional_profile(
+        self, mongo_db: AsyncIOMotorDatabase, collection_name: str, user_id: str
+    ) -> int:
+        result = await mongo_db[collection_name].delete_one({"user_id": user_id})
+        return result.deleted_count
+
+    async def set_additional_profile_field(
+        self,
+        mongo_db: AsyncIOMotorDatabase,
+        collection_name: str,
+        user_id: str,
+        field_name: str,
+        value: Any,
+    ) -> int:
+        result = await mongo_db[collection_name].update_one(
+            {"user_id": user_id},
+            {"$set": {"user_id": user_id, field_name: value}},
+            upsert=True,
+        )
+        return (result.modified_count or 0) + (1 if result.upserted_id else 0)
+
+    async def delete_additional_profile_field(
+        self,
+        mongo_db: AsyncIOMotorDatabase,
+        collection_name: str,
+        user_id: str,
+        field_name: str,
+    ) -> int:
+        result = await mongo_db[collection_name].update_one(
+            {"user_id": user_id},
+            {"$unset": {field_name: ""}},
+        )
+        return result.modified_count
+
+    async def delete_additional_profile_item(
+        self,
+        mongo_db: AsyncIOMotorDatabase,
+        collection_name: str,
+        user_id: str,
+        field_name: str,
+        item_id: str,
+    ) -> int:
+        result = await mongo_db[collection_name].update_one(
+            {"user_id": user_id},
+            {"$pull": {field_name: {"id": item_id}}},
+        )
+        return result.modified_count

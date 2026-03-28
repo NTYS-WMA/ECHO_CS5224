@@ -69,10 +69,19 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
+For cloud deployment, start from `.env.production.example`.
+
 3. Run service
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 18087 --reload
+```
+
+Or run with Docker:
+
+```bash
+docker build -t db-manager:latest .
+docker run --rm -p 18087:18087 --env-file .env db-manager:latest
 ```
 
 4. Verify
@@ -80,6 +89,15 @@ uvicorn app.main:app --host 0.0.0.0 --port 18087 --reload
 - `GET /health/live`
 - `GET /health/ready`
 - `POST /internal/bootstrap` (manual re-run init)
+
+Every response includes `X-Request-Id` for tracing.
+
+## API Security
+
+When `AUTH_ENABLED=true`, all business routes require `X-API-Key`.
+
+- User routes (`/memories`, `/profile`, `/relationship-db/*`): `X-API-Key: <API_KEY>`
+- Admin routes (`/internal/*`): `X-API-Key: <ADMIN_API_KEY>` (falls back to `API_KEY` if `ADMIN_API_KEY` is unset)
 
 ## PostgreSQL Objects Created
 
