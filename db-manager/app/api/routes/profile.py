@@ -2,7 +2,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.db.mongo import get_mongo_db
 from app.db.postgres import get_pg_session
@@ -25,8 +25,8 @@ class ProfileUpdateResponse(BaseModel):
     success: bool
     basic_info_updated: bool = False
     additional_profile_updated: bool = False
-    operations_performed: Dict[str, int] = {"added": 0, "updated": 0, "deleted": 0}
-    errors: List[str] = []
+    operations_performed: Dict[str, int] = Field(default_factory=lambda: {"added": 0, "updated": 0, "deleted": 0})
+    errors: List[str] = Field(default_factory=list)
 
 
 class BasicInfo(BaseModel):
@@ -69,9 +69,9 @@ class PersonalityItem(BaseModel):
 
 
 class SocialContext(BaseModel):
-    family: Dict[str, Any] = {}
-    friends: List[Dict[str, Any]] = []
-    others: List[Dict[str, Any]] = []
+    family: Dict[str, Any] = Field(default_factory=dict)
+    friends: List[Dict[str, Any]] = Field(default_factory=list)
+    others: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class LearningPreferences(BaseModel):
@@ -81,22 +81,30 @@ class LearningPreferences(BaseModel):
 
 
 class AdditionalProfile(BaseModel):
-    interests: List[InterestItem] = []
-    skills: List[SkillItem] = []
-    personality: List[PersonalityItem] = []
-    social_context: SocialContext = SocialContext()
-    learning_preferences: LearningPreferences = LearningPreferences()
+    interests: List[InterestItem] = Field(default_factory=list)
+    skills: List[SkillItem] = Field(default_factory=list)
+    personality: List[PersonalityItem] = Field(default_factory=list)
+    social_context: SocialContext = Field(default_factory=SocialContext)
+    learning_preferences: LearningPreferences = Field(default_factory=LearningPreferences)
 
 
 class UserProfile(BaseModel):
     user_id: str
-    basic_info: BasicInfo = BasicInfo()
-    additional_profile: AdditionalProfile = AdditionalProfile()
+    basic_info: BasicInfo = Field(default_factory=BasicInfo)
+    additional_profile: AdditionalProfile = Field(default_factory=AdditionalProfile)
 
 
 class MissingFieldsResponse(BaseModel):
     user_id: str
     missing_fields: Dict[str, List[str]]
+
+
+class BasicInfoUpdateRequest(BaseModel):
+    data: BasicInfo
+
+
+class AdditionalProfileUpdateRequest(BaseModel):
+    data: Dict[str, Any]
 
 
 profile_repo = ProfileRepository()
@@ -124,6 +132,12 @@ def _model_fields(model_cls: type[BaseModel]) -> list[str]:
     if hasattr(model_cls, "model_fields"):
         return list(model_cls.model_fields.keys())
     return list(model_cls.__fields__.keys())
+
+
+def _model_dump(model: BaseModel, exclude_none: bool = False) -> dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump(exclude_none=exclude_none)
+    return model.dict(exclude_none=exclude_none)
 
 
 def _messages_text(messages: List[Message]) -> str:
@@ -384,3 +398,97 @@ async def get_missing_fields(
             "additional_profile": missing_additional,
         },
     )
+
+
+@router.put("/profile/basic-info")
+async def update_basic_info(
+    user_id: str = Query(..., description="User ID"),
+    request: BasicInfoUpdateRequest = ...,
+):
+    payload = _model_dump(request.data, exclude_none=True)
+    if not payload:
+        raise HTTPException(status_code=400, detail="No basic_info fields provided")
+
+    async with get_pg_session() as session:
+        await profile_repo.upsert_basic_profile(session, user_id, payload)
+        await session.commit()
+
+    return {"success": True, "user_id": user_id, "updated_fields": list(payload.keys())}
+
+
+@router.put("/profile/additional-profile")
+async def update_additional_profile(
+    user_id: str = Query(..., description="User ID"),
+    request: AdditionalProfileUpdateRequest = ...,
+):
+    if not request.data:
+        raise HTTPException(status_code=400, detail="No additional_profile fields provided")
+
+    mongo_db = get_mongo_db()
+    collection_name = "user_additional_profile"
+    existing_doc = await profile_repo.get_additional_profile(mongo_db, collection_name, user_id)
+    merged = _merge_additional(existing_doc, {"user_id": user_id, **request.data})
+    await profile_repo.upsert_additional_profile(mongo_db, collection_name, user_id, merged)
+
+    return {"success": True, "user_id": user_id, "updated_fields": list(request.data.keys())}
+
+
+@router.delete("/profile")
+async def delete_profile(user_id: str = Query(..., description="User ID")):
+    async with get_pg_session() as session:
+        deleted_basic = await profile_repo.delete_basic_profile(session, user_id)
+        await session.commit()
+
+    mongo_db = get_mongo_db()
+    deleted_additional = await profile_repo.delete_additional_profile(
+        mongo_db, "user_additional_profile", user_id
+    )
+
+    return {
+        "success": True,
+        "user_id": user_id,
+        "basic_info_deleted": bool(deleted_basic),
+        "additional_profile_deleted": bool(deleted_additional),
+    }
+
+
+@router.delete("/profile/additional-profile/{field_name}/{item_id}")
+async def delete_additional_profile_item(
+    field_name: str,
+    item_id: str,
+    user_id: str = Query(..., description="User ID"),
+):
+    if field_name not in {"interests", "skills", "personality"}:
+        raise HTTPException(status_code=400, detail="Unsupported array field for item delete")
+
+    mongo_db = get_mongo_db()
+    deleted = await profile_repo.delete_additional_profile_item(
+        mongo_db,
+        "user_additional_profile",
+        user_id,
+        field_name,
+        item_id,
+    )
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Profile item not found")
+    return {"success": True, "user_id": user_id, "field": field_name, "item_id": item_id}
+
+
+@router.delete("/profile/additional-profile/{field_name}")
+async def delete_additional_profile_field(
+    field_name: str,
+    user_id: str = Query(..., description="User ID"),
+):
+    if field_name not in set(ADDITIONAL_FIELDS):
+        raise HTTPException(status_code=400, detail="Unsupported additional profile field")
+
+    mongo_db = get_mongo_db()
+    deleted = await profile_repo.delete_additional_profile_field(
+        mongo_db,
+        "user_additional_profile",
+        user_id,
+        field_name,
+    )
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Profile field not found")
+    return {"success": True, "user_id": user_id, "field": field_name}
