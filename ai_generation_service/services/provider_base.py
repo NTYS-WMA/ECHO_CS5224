@@ -7,8 +7,8 @@ retry and fallback chain.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -19,6 +19,25 @@ class ProviderResponse:
     model: str
     input_tokens: int
     output_tokens: int
+
+
+@dataclass
+class ToolCallItem:
+    """A single tool call returned by the model."""
+
+    name: str
+    arguments: Dict[str, Any]
+
+
+@dataclass
+class ProviderToolResponse:
+    """Standardized response from a tool-calling request."""
+
+    content: Optional[str]
+    tool_calls: List[ToolCallItem] = field(default_factory=list)
+    model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @dataclass
@@ -76,6 +95,30 @@ class AIProviderBase(ABC):
         Raises:
             ProviderTimeoutError: If the provider does not respond in time.
             ProviderError: For any other provider-level failure.
+        """
+        ...
+
+    @abstractmethod
+    async def generate_with_tools(
+        self,
+        messages: List[dict],
+        tools: List[dict],
+        tool_choice: str = "auto",
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+    ) -> ProviderToolResponse:
+        """
+        Send a chat completion request with tool definitions.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content' keys.
+            tools: List of tool definitions in OpenAI function-calling format.
+            tool_choice: Tool selection strategy ("auto", "any", or "none").
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+
+        Returns:
+            ProviderToolResponse with optional content and tool calls.
         """
         ...
 
