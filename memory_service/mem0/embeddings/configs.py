@@ -26,6 +26,7 @@ class EmbedderConfig(BaseModel):
             "aws_bedrock",
             "doubao",
             "qwen",
+            "generation_service",
         ]:
             return v
         else:
