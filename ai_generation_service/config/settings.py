@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Primary AI provider (Amazon Bedrock / Claude)
     PRIMARY_PROVIDER: str = "bedrock"
     BEDROCK_REGION: str = "ap-southeast-1"
-    BEDROCK_MODEL_ID: str = "anthropic.claude-sonnet-4-20250514-v1:0"
+    BEDROCK_MODEL_ID: str = "apac.anthropic.claude-sonnet-4-20250514-v1:0"
     BEDROCK_MAX_RETRIES: int = 2
     BEDROCK_TIMEOUT_SECONDS: int = 30
     BEDROCK_EMBEDDING_MODEL_ID: str = "cohere.embed-multilingual-v3"
