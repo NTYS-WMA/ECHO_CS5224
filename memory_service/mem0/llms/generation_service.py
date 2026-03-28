@@ -117,6 +117,50 @@ class GenerationServiceLLM(LLMBase):
     # LLMBase interface
     # ------------------------------------------------------------------
 
+    def _call_tool_completion(
+        self,
+        messages: List[Dict[str, str]],
+        tools: List[Dict],
+        tool_choice: str = "auto",
+    ) -> Dict:
+        """
+        Call the ai_generation_service /tool-completion endpoint.
+
+        Returns a dict matching the format expected by mem0 callers:
+            {"content": str|None, "tool_calls": [{"name": str, "arguments": dict}, ...]}
+        """
+        # Convert tools to the request format expected by the endpoint
+        tool_defs = []
+        for tool in tools:
+            tool_defs.append({
+                "type": tool.get("type", "function"),
+                "function": tool.get("function", {}),
+            })
+
+        payload = {
+            "user_id": "memory-service",
+            "messages": messages,
+            "tools": tool_defs,
+            "tool_choice": tool_choice,
+            "generation_config": {
+                "temperature": self._temperature,
+                "max_tokens": self._max_tokens,
+            },
+        }
+
+        resp = requests.post(
+            f"{self._service_url}/api/v1/generation/tool-completion",
+            json=payload,
+            timeout=60,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        return {
+            "content": data.get("content"),
+            "tool_calls": data.get("tool_calls", []),
+        }
+
     def generate_response(
         self,
         messages: List[Dict[str, str]],
@@ -129,23 +173,33 @@ class GenerationServiceLLM(LLMBase):
         Generate a response by calling ai_generation_service.
 
         Falls back to direct DeepSeek if service is marked unavailable.
+        Supports tool/function calling via the /tool-completion endpoint.
         """
-        if tools is not None:
-            raise NotImplementedError(
-                "GenerationServiceLLM does not support tool/function calling. "
-                "Disable graph_store or use a direct LLM provider."
-            )
-
         if not self.available:
             if self._fallback:
                 logger.warning("GenerationServiceLLM: using DeepSeek fallback (service unavailable).")
                 return self._fallback.generate_response(
-                    messages=messages, response_format=response_format, **kwargs
+                    messages=messages, response_format=response_format,
+                    tools=tools, tool_choice=tool_choice, **kwargs
                 )
             raise RuntimeError(
                 "GenerationServiceLLM: service unavailable and no fallback configured."
             )
 
+        # ---- Tool-calling path ----
+        if tools is not None:
+            try:
+                return self._call_tool_completion(messages, tools, tool_choice)
+            except Exception as e:
+                logger.error(f"GenerationServiceLLM: tool-completion failed ({e}), falling back to DeepSeek.")
+                if self._fallback:
+                    return self._fallback.generate_response(
+                        messages=messages, response_format=response_format,
+                        tools=tools, tool_choice=tool_choice, **kwargs
+                    )
+                raise
+
+        # ---- Regular text generation path ----
         # Inject JSON instruction when caller requests JSON mode
         if response_format and response_format.get("type") == "json_object":
             messages = self._inject_json_instruction(messages)

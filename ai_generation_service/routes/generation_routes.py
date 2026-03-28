@@ -14,11 +14,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..models.requests import (
     EmbeddingRequest,
     TemplateGenerationRequest,
+    ToolCompletionRequest,
 )
 from ..models.responses import (
     EmbeddingResponse,
     ErrorResponse,
     GenerationResponse,
+    ToolCallResponse,
 )
 from ..services.generation_service import GenerationError, GenerationService
 
@@ -111,7 +113,46 @@ async def execute_generation(
 
 
 # ------------------------------------------------------------------ #
-# 2. Embedding
+# 2. Tool Completion
+# ------------------------------------------------------------------ #
+
+
+@router.post(
+    "/tool-completion",
+    response_model=ToolCallResponse,
+    responses={
+        500: {"model": ErrorResponse, "description": "Generation failed after all retries"},
+        503: {"model": ErrorResponse, "description": "Provider timeout (retryable)"},
+    },
+    summary="Execute a generation with tool/function calling",
+    description=(
+        "Invoke the AI provider with tool definitions. The model may return "
+        "structured tool calls (function name + arguments) instead of or in "
+        "addition to text content. Used by Memory Service for graph memory "
+        "operations, entity extraction, and other structured output tasks."
+    ),
+)
+async def execute_tool_completion(
+    request: ToolCompletionRequest,
+    service: GenerationService = Depends(get_generation_service),
+) -> ToolCallResponse:
+    """Execute a tool-calling generation request."""
+    try:
+        return await service.execute_with_tools(request)
+    except GenerationError as e:
+        logger.error(
+            "Tool completion failed for user %s: [%s] %s",
+            request.user_id,
+            e.error_code,
+            str(e),
+        )
+        _handle_generation_error(e, request.correlation_id)
+    except Exception as e:
+        _handle_unexpected_error(e, request.correlation_id)
+
+
+# ------------------------------------------------------------------ #
+# 3. Embedding
 # ------------------------------------------------------------------ #
 
 

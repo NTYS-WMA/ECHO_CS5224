@@ -79,6 +79,57 @@ class GenerationResponse(BaseModel):
 
 
 # ------------------------------------------------------------------ #
+# Tool Call Response
+# ------------------------------------------------------------------ #
+
+
+class ToolCallItem(BaseModel):
+    """A single tool call returned by the model."""
+
+    name: str = Field(
+        ...,
+        description="Name of the tool/function the model wants to call.",
+        examples=["extract_entities"],
+    )
+    arguments: Dict[str, Any] = Field(
+        ...,
+        description="Arguments for the tool call, matching the tool's parameter schema.",
+        examples=[{"entities": [{"entity": "Alice", "entity_type": "person"}]}],
+    )
+
+
+class ToolCallResponse(BaseModel):
+    """
+    Response body for POST /api/v1/generation/tool-completion.
+
+    Contains optional text content and a list of tool calls.
+    """
+
+    response_id: str = Field(
+        ...,
+        description="Unique identifier for this response.",
+        examples=["gen-tc-445"],
+    )
+    content: Optional[str] = Field(
+        None,
+        description="Optional text content returned alongside tool calls.",
+    )
+    tool_calls: List[ToolCallItem] = Field(
+        default_factory=list,
+        description="List of tool calls the model wants to make.",
+    )
+    model: str = Field(
+        ...,
+        description="Model identifier used for generation.",
+        examples=["anthropic.claude-sonnet-4-20250514"],
+    )
+    usage: UsageInfo = Field(
+        ...,
+        description="Token usage statistics.",
+    )
+
+
+# ------------------------------------------------------------------ #
 # Embedding Response
 # ------------------------------------------------------------------ #
 

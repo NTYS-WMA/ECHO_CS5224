@@ -19,6 +19,8 @@ from .provider_base import (
     ProviderError,
     ProviderResponse,
     ProviderTimeoutError,
+    ProviderToolResponse,
+    ToolCallItem,
 )
 
 logger = logging.getLogger(__name__)
@@ -178,6 +180,135 @@ class BedrockProvider(AIProviderBase):
             error_msg = str(e)
             logger.error("Bedrock generation failed: %s", error_msg)
             raise ProviderError(f"Bedrock generation failed: {error_msg}")
+
+    def _convert_tools_to_bedrock(self, tools: List[dict]) -> List[dict]:
+        """
+        Convert OpenAI-format tool definitions to Bedrock Converse toolConfig format.
+
+        OpenAI format:
+            {"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}
+        Bedrock format:
+            {"toolSpec": {"name": "...", "description": "...", "inputSchema": {"json": {...}}}}
+        """
+        bedrock_tools = []
+        for tool in tools:
+            func = tool.get("function", {})
+            spec = {
+                "name": func.get("name", ""),
+                "description": func.get("description", ""),
+                "inputSchema": {"json": func.get("parameters", {})},
+            }
+            bedrock_tools.append({"toolSpec": spec})
+        return bedrock_tools
+
+    def _convert_tool_choice_to_bedrock(self, tool_choice: str) -> dict:
+        """Convert tool_choice string to Bedrock toolChoice format."""
+        if tool_choice == "none":
+            return {}  # No toolChoice means model won't use tools
+        if tool_choice == "any":
+            return {"any": {}}
+        # "auto" is the default
+        return {"auto": {}}
+
+    async def generate_with_tools(
+        self,
+        messages: List[dict],
+        tools: List[dict],
+        tool_choice: str = "auto",
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+    ) -> ProviderToolResponse:
+        """
+        Invoke the Bedrock Converse API with tool definitions.
+
+        Converts OpenAI-format tools to Bedrock's toolConfig format and
+        parses tool_use blocks from the response.
+        """
+        client = await self._get_client()
+
+        # Separate system prompt from conversation messages
+        system_prompt = None
+        conversation_messages = []
+        for msg in messages:
+            if msg["role"] == "system":
+                system_prompt = msg["content"]
+            else:
+                conversation_messages.append(
+                    {
+                        "role": msg["role"],
+                        "content": [{"text": msg["content"]}],
+                    }
+                )
+
+        # Build the Converse API request
+        request_params = {
+            "modelId": self._model_id,
+            "messages": conversation_messages,
+            "inferenceConfig": {
+                "temperature": temperature,
+                "maxTokens": max_tokens,
+            },
+            "toolConfig": {
+                "tools": self._convert_tools_to_bedrock(tools),
+            },
+        }
+
+        # Add tool choice if not "none"
+        if tool_choice != "none":
+            request_params["toolConfig"]["toolChoice"] = self._convert_tool_choice_to_bedrock(tool_choice)
+
+        if system_prompt:
+            request_params["system"] = [{"text": system_prompt}]
+
+        try:
+            loop = asyncio.get_event_loop()
+            response = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: client.converse(**request_params)),
+                timeout=self._timeout_seconds,
+            )
+
+            # Extract response content blocks
+            output_message = response.get("output", {}).get("message", {})
+            content_blocks = output_message.get("content", [])
+
+            text_content = ""
+            tool_calls = []
+
+            for block in content_blocks:
+                if "text" in block:
+                    text_content += block["text"]
+                elif "toolUse" in block:
+                    tool_use = block["toolUse"]
+                    tool_calls.append(
+                        ToolCallItem(
+                            name=tool_use.get("name", ""),
+                            arguments=tool_use.get("input", {}),
+                        )
+                    )
+
+            usage = response.get("usage", {})
+
+            return ProviderToolResponse(
+                content=text_content or None,
+                tool_calls=tool_calls,
+                model=self._model_id,
+                input_tokens=usage.get("inputTokens", 0),
+                output_tokens=usage.get("outputTokens", 0),
+            )
+
+        except asyncio.TimeoutError:
+            logger.error(
+                "Bedrock tool-calling request timed out after %ds for model %s",
+                self._timeout_seconds,
+                self._model_id,
+            )
+            raise ProviderTimeoutError(
+                f"Bedrock tool-calling request timed out after {self._timeout_seconds}s"
+            )
+        except Exception as e:
+            error_msg = str(e)
+            logger.error("Bedrock tool-calling generation failed: %s", error_msg)
+            raise ProviderError(f"Bedrock tool-calling generation failed: {error_msg}")
 
     async def embed(self, text: str) -> EmbeddingResponse:
         """
