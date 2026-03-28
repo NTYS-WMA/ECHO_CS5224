@@ -36,7 +36,7 @@ class BedrockProvider(AIProviderBase):
     def __init__(
         self,
         region: str = "ap-southeast-1",
-        model_id: str = "anthropic.claude-sonnet-4-20250514-v1:0",
+        model_id: str = "apac.anthropic.claude-sonnet-4-20250514-v1:0",
         timeout_seconds: int = 30,
         max_retries: int = 2,
         embedding_model_id: str = "cohere.embed-multilingual-v3",
