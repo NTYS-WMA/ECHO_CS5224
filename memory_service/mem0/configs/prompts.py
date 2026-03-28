@@ -343,3 +343,39 @@ def get_update_memory_messages(retrieved_old_memory_dict, response_content, cust
 
     Do not return anything except the JSON format.
     """
+
+UPDATE_MEMORY_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "update_memory",
+        "description": "Add, update, or delete memories based on new information extracted from conversation.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "memory": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "string",
+                                "description": "Existing memory ID (for UPDATE/DELETE) or new ID (for ADD)",
+                            },
+                            "text": {"type": "string", "description": "Memory content"},
+                            "event": {
+                                "type": "string",
+                                "enum": ["ADD", "UPDATE", "DELETE", "NONE"],
+                            },
+                            "old_memory": {
+                                "type": "string",
+                                "description": "Previous content, required only for UPDATE",
+                            },
+                        },
+                        "required": ["id", "text", "event"],
+                    },
+                }
+            },
+            "required": ["memory"],
+        },
+    },
+}
