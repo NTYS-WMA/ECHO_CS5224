@@ -19,6 +19,7 @@ from mem0.configs.base import MemoryConfig, MemoryItem
 from mem0.configs.enums import MemoryType
 from mem0.configs.prompts import (
     PROCEDURAL_MEMORY_SYSTEM_PROMPT,
+    UPDATE_MEMORY_TOOL,
     get_update_memory_messages,
 )
 from mem0.memory.base import MemoryBase
@@ -394,24 +395,17 @@ class Memory(MemoryBase):
             )
 
             try:
-                response: str = self.llm.generate_response(
+                response: dict = self.llm.generate_response(
                     messages=[{"role": "user", "content": function_calling_prompt}],
-                    response_format={"type": "json_object"},
+                    tools=[UPDATE_MEMORY_TOOL],
+                    tool_choice="any",
                 )
             except Exception as e:
                 logger.error(f"Error in new memory actions response: {e}")
-                response = ""
+                response = {}
 
-            try:
-                if not response or not response.strip():
-                    logger.warning("Empty response from LLM, no memories to extract")
-                    new_memories_with_actions = {}
-                else:
-                    response = remove_code_blocks(response)
-                    new_memories_with_actions = json.loads(response)
-            except Exception as e:
-                logger.error(f"Invalid JSON response: {e}")
-                new_memories_with_actions = {}
+            tool_calls = response.get("tool_calls", []) if isinstance(response, dict) else []
+            new_memories_with_actions = tool_calls[0]["arguments"] if tool_calls else {}
         else:
             new_memories_with_actions = {}
 
@@ -1342,21 +1336,15 @@ class AsyncMemory(MemoryBase):
                 response = await asyncio.to_thread(
                     self.llm.generate_response,
                     messages=[{"role": "user", "content": function_calling_prompt}],
-                    response_format={"type": "json_object"},
+                    tools=[UPDATE_MEMORY_TOOL],
+                    tool_choice="any",
                 )
             except Exception as e:
                 logger.error(f"Error in new memory actions response: {e}")
-                response = ""
-            try:
-                if not response or not response.strip():
-                    logger.warning("Empty response from LLM, no memories to extract")
-                    new_memories_with_actions = {}
-                else:
-                    response = remove_code_blocks(response)
-                    new_memories_with_actions = json.loads(response)
-            except Exception as e:
-                logger.error(f"Invalid JSON response: {e}")
-                new_memories_with_actions = {}
+                response = {}
+
+            tool_calls = response.get("tool_calls", []) if isinstance(response, dict) else []
+            new_memories_with_actions = tool_calls[0]["arguments"] if tool_calls else {}
         else:
             new_memories_with_actions = {}
 

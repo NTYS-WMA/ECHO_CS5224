@@ -97,14 +97,17 @@ class TestGenerationServiceLLM(unittest.TestCase):
         self.assertEqual(result[0]["role"], "system")
         self.assertIn("valid JSON", result[0]["content"])
 
-    def test_tools_raises_not_implemented(self):
-        """Passing tools= raises NotImplementedError."""
+    def test_tools_routes_to_tool_completion(self):
+        """Passing tools= routes to /tool-completion and returns tool_calls."""
         llm = self._make_llm()
-        with self.assertRaises(NotImplementedError):
-            llm.generate_response(
-                messages=[{"role": "user", "content": "Hi"}],
-                tools=[{"name": "some_tool"}],
-            )
+        tools = [{"type": "function", "function": {"name": "some_tool", "parameters": {}}}]
+        result = llm.generate_response(
+            messages=[{"role": "user", "content": "Hi"}],
+            tools=tools,
+        )
+        self.assertIn("tool_calls", result)
+        self.assertIsInstance(result["tool_calls"], list)
+        self.assertEqual(result["tool_calls"][0]["name"], "some_tool")
 
     def test_unavailable_with_no_fallback(self):
         """Unavailable service with no fallback raises RuntimeError."""

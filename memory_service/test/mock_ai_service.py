@@ -74,6 +74,26 @@ class MockHandler(BaseHTTPRequestHandler):
                 "usage": {"input_tokens": 10, "output_tokens": 5},
             })
 
+        elif path == "/api/v1/generation/tool-completion":
+            messages = body.get("messages", [])
+            tools = body.get("tools", [])
+            # Simulate a tool call response using the first tool provided
+            if tools:
+                first_fn = tools[0].get("function", {})
+                fn_name = first_fn.get("name", "unknown_tool")
+                # Return a mock tool call
+                self._send_json(200, {
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "name": fn_name,
+                            "arguments": {"mock_param": "mock_value"},
+                        }
+                    ],
+                })
+            else:
+                self._send_json(200, {"content": "No tools provided", "tool_calls": []})
+
         elif path == "/api/v1/generation/embeddings":
             # Return a random 1024-dim vector
             vector = [round(random.gauss(0, 0.1), 6) for _ in range(1024)]
