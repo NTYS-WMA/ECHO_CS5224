@@ -20,6 +20,8 @@ from .provider_base import (
     ProviderError,
     ProviderResponse,
     ProviderTimeoutError,
+    ProviderToolResponse,
+    ToolCallItem,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,6 +117,71 @@ class FallbackProvider(AIProviderBase):
         except Exception as e:
             logger.error("Fallback provider error: %s", str(e))
             raise ProviderError(f"Fallback provider error: {str(e)}")
+
+    async def generate_with_tools(
+        self,
+        messages: List[dict],
+        tools: List[dict],
+        tool_choice: str = "auto",
+        temperature: float = 0.7,
+        max_tokens: int = 512,
+    ) -> ProviderToolResponse:
+        """
+        Send a chat completion request with tools to the OpenAI-compatible API.
+        """
+        url = f"{self._api_base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self._model_id,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "tools": tools,
+            "tool_choice": tool_choice,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+                response = await client.post(url, headers=headers, json=payload)
+                response.raise_for_status()
+                data = response.json()
+
+            choice = data.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            content = message.get("content")
+            usage = data.get("usage", {})
+
+            tool_calls = []
+            if message.get("tool_calls"):
+                import json
+                for tc in message["tool_calls"]:
+                    func = tc.get("function", {})
+                    tool_calls.append(
+                        ToolCallItem(
+                            name=func.get("name", ""),
+                            arguments=json.loads(func.get("arguments", "{}")),
+                        )
+                    )
+
+            return ProviderToolResponse(
+                content=content,
+                tool_calls=tool_calls,
+                model=data.get("model", self._model_id),
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+            )
+
+        except httpx.TimeoutException:
+            raise ProviderTimeoutError(
+                f"Fallback tool-calling timed out after {self._timeout_seconds}s"
+            )
+        except httpx.HTTPStatusError as e:
+            raise ProviderError(f"Fallback tool-calling HTTP error: {e.response.status_code}")
+        except Exception as e:
+            raise ProviderError(f"Fallback tool-calling error: {str(e)}")
 
     async def embed(self, text: str) -> EmbeddingResponse:
         """
