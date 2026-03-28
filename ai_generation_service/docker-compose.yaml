@@ -19,7 +19,7 @@ services:
       # Service configuration (prefix: AI_GEN_)
       - AI_GEN_PORT=8003
       - AI_GEN_BEDROCK_REGION=ap-southeast-1
-      - AI_GEN_BEDROCK_MODEL_ID=anthropic.claude-sonnet-4-20250514-v1:0
+      - AI_GEN_BEDROCK_MODEL_ID=apac.anthropic.claude-sonnet-4-20250514-v1:0
       - AI_GEN_BEDROCK_EMBEDDING_MODEL_ID=cohere.embed-multilingual-v3
       - AI_GEN_LOG_LEVEL=INFO
 
