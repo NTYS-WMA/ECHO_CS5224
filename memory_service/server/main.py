@@ -43,7 +43,7 @@ POSTGRES_DB = os.environ.get("POSTGRES_DB", "postgres")
 POSTGRES_USER = os.environ.get("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "postgres")
 POSTGRES_COLLECTION = os.environ.get("POSTGRES_COLLECTION", "memories")
-EMBEDDING_MODEL_DIMS = int(os.environ.get("EMBEDDING_MODEL_DIMS", "1536"))
+EMBEDDING_MODEL_DIMS = int(os.environ.get("EMBEDDING_MODEL_DIMS", "1536"))  # overridden below if USE_GENERATION_SERVICE
 
 # API Keys
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
@@ -63,10 +63,48 @@ VOLCENGINE_DEEPSEEK_BASE_URL = os.environ.get(
 # MainService configuration (for cold start)
 MAINSERVICE_BASE_URL = os.environ.get("MAINSERVICE_BASE_URL")
 
+# AI Generation Service configuration (optional LLM routing)
+USE_GENERATION_SERVICE = os.environ.get("USE_GENERATION_SERVICE", "false").lower() == "true"
+AI_GENERATION_SERVICE_URL = os.environ.get("AI_GENERATION_SERVICE_URL", "http://localhost:8003")
+
 # Neo4j configuration
 # NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://neo4j:7687")
 # NEO4J_USERNAME = os.environ.get("NEO4J_USERNAME", "neo4j")
 # NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "mem0graph")
+
+_DEEPSEEK_LLM_CONFIG = {
+    "provider": "deepseek",
+    "config": {
+        # Use VolcEngine DeepSeek if configured, otherwise fall back to official DeepSeek
+        "api_key": VOLCENGINE_DEEPSEEK_API_KEY or DEEPSEEK_API_KEY,
+        "model": VOLCENGINE_DEEPSEEK_ENDPOINT_ID or "deepseek-chat",
+        "deepseek_base_url": VOLCENGINE_DEEPSEEK_BASE_URL if VOLCENGINE_DEEPSEEK_API_KEY else None,
+        "temperature": 0.2,
+        "max_tokens": 2000,
+    },
+}
+
+_GENERATION_SERVICE_LLM_CONFIG = {
+    "provider": "generation_service",
+    "config": {
+        "service_url": AI_GENERATION_SERVICE_URL,
+        # DeepSeek fallback credentials (used if ai_generation_service is unreachable)
+        "api_key": VOLCENGINE_DEEPSEEK_API_KEY or DEEPSEEK_API_KEY,
+        "model": VOLCENGINE_DEEPSEEK_ENDPOINT_ID or "deepseek-chat",
+        "deepseek_base_url": VOLCENGINE_DEEPSEEK_BASE_URL if VOLCENGINE_DEEPSEEK_API_KEY else None,
+        "temperature": 0.2,
+        "max_tokens": 2000,
+    },
+}
+
+_LLM_CONFIG = _GENERATION_SERVICE_LLM_CONFIG if USE_GENERATION_SERVICE else _DEEPSEEK_LLM_CONFIG
+
+if USE_GENERATION_SERVICE:
+    EMBEDDING_MODEL_DIMS = 1024  # Bedrock Titan embed-text-v2
+
+logger.info(
+    f"LLM provider: {'ai_generation_service (' + AI_GENERATION_SERVICE_URL + ')' if USE_GENERATION_SERVICE else 'deepseek (direct)'}"
+)
 
 DEFAULT_CONFIG = {
     "version": "v1.1",
@@ -92,24 +130,20 @@ DEFAULT_CONFIG = {
     #     "config": {"url": NEO4J_URI, "username": NEO4J_USERNAME, "password": NEO4J_PASSWORD},
     # },
     # Remove graph_store to disable graph database functionality
-    "llm": {
-        "provider": "deepseek",
-        "config": {
-            # Use VolcEngine DeepSeek if configured, otherwise fall back to official DeepSeek
-            "api_key": VOLCENGINE_DEEPSEEK_API_KEY or DEEPSEEK_API_KEY,
-            "model": VOLCENGINE_DEEPSEEK_ENDPOINT_ID or "deepseek-chat",
-            "deepseek_base_url": VOLCENGINE_DEEPSEEK_BASE_URL if VOLCENGINE_DEEPSEEK_API_KEY else None,
-            "temperature": 0.2,
-            "max_tokens": 2000
-        }
-    },
+    "llm": _LLM_CONFIG,
     "embedder": {
+        "provider": "generation_service",
+        "config": {
+            "service_url": AI_GENERATION_SERVICE_URL,
+            "embedding_dims": 1024,
+        }
+    } if USE_GENERATION_SERVICE else {
         "provider": "qwen",
         "config": {
             "api_key": DASHSCOPE_API_KEY,
             "model": "text-embedding-v4",
             "qwen_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "embedding_dims": 1536
+            "embedding_dims": 1536,
         }
     },
     "history_db_path": HISTORY_DB_PATH,

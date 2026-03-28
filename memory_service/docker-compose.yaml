@@ -68,6 +68,9 @@ services:
       - PALSERVER_BASE_URL=${PALSERVER_BASE_URL:-http://localhost:8099/pal}
       - HISTORY_DB_PATH=/app/history/history.db
       - EMBEDDING_MODEL_DIMS=1536
+      # AI Generation Service (optional LLM routing)
+      - USE_GENERATION_SERVICE=${USE_GENERATION_SERVICE:-false}
+      - AI_GENERATION_SERVICE_URL=${AI_GENERATION_SERVICE_URL:-http://host.docker.internal:8003}
       # Logging配置
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:

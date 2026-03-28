@@ -44,6 +44,7 @@ class LlmFactory:
         "lmstudio": ("mem0.llms.lmstudio.LMStudioLLM", LMStudioConfig),
         "vllm": ("mem0.llms.vllm.VllmLLM", VllmConfig),
         "langchain": ("mem0.llms.langchain.LangchainLLM", BaseLlmConfig),
+        "generation_service": ("mem0.llms.generation_service.GenerationServiceLLM", BaseLlmConfig),
     }
 
     @classmethod
@@ -75,6 +76,9 @@ class LlmFactory:
         elif isinstance(config, dict):
             # Merge dict config with kwargs
             config.update(kwargs)
+            # generation_service passes raw dict directly (contains custom keys like service_url)
+            if provider_name == "generation_service":
+                return llm_class(config)
             config = config_class(**config)
         elif isinstance(config, BaseLlmConfig):
             # Convert base config to provider-specific config if needed
@@ -141,6 +145,7 @@ class EmbedderFactory:
         "aws_bedrock": "mem0.embeddings.aws_bedrock.AWSBedrockEmbedding",
         "doubao": "mem0.embeddings.doubao.DoubaoEmbedding",
         "qwen": "mem0.embeddings.qwen.QwenEmbedding",
+        "generation_service": "mem0.embeddings.generation_service.GenerationServiceEmbedding",
     }
 
     @classmethod
@@ -150,6 +155,9 @@ class EmbedderFactory:
         class_type = cls.provider_to_class.get(provider_name)
         if class_type:
             embedder_instance = load_class(class_type)
+            # generation_service embedder accepts raw dict to preserve custom keys (e.g. service_url)
+            if provider_name == "generation_service":
+                return embedder_instance(config)
             base_config = BaseEmbedderConfig(**config)
             return embedder_instance(base_config)
         else:
