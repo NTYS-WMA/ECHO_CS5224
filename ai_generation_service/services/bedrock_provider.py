@@ -36,10 +36,10 @@ class BedrockProvider(AIProviderBase):
     def __init__(
         self,
         region: str = "ap-southeast-1",
-        model_id: str = "anthropic.claude-sonnet-4-20250514",
+        model_id: str = "anthropic.claude-sonnet-4-20250514-v1:0",
         timeout_seconds: int = 30,
         max_retries: int = 2,
-        embedding_model_id: str = "amazon.titan-embed-text-v2:0",
+        embedding_model_id: str = "cohere.embed-multilingual-v3",
     ):
         """
         Initialize the Bedrock provider.
@@ -312,7 +312,9 @@ class BedrockProvider(AIProviderBase):
 
     async def embed(self, text: str) -> EmbeddingResponse:
         """
-        Generate an embedding vector using Amazon Titan Embeddings via Bedrock.
+        Generate an embedding vector via Bedrock.
+
+        Supports both Cohere Embed and Amazon Titan Embed models.
 
         Args:
             text: The input text to embed.
@@ -322,7 +324,15 @@ class BedrockProvider(AIProviderBase):
         """
         client = await self._get_client()
 
-        request_body = json.dumps({"inputText": text})
+        is_cohere = "cohere" in self._embedding_model_id.lower()
+
+        if is_cohere:
+            request_body = json.dumps({
+                "texts": [text],
+                "input_type": "search_document",
+            })
+        else:
+            request_body = json.dumps({"inputText": text})
 
         try:
             loop = asyncio.get_event_loop()
@@ -340,8 +350,14 @@ class BedrockProvider(AIProviderBase):
             )
 
             response_body = json.loads(response["body"].read())
-            embedding = response_body.get("embedding", [])
-            input_tokens = response_body.get("inputTextTokenCount", 0)
+
+            if is_cohere:
+                embeddings = response_body.get("embeddings", [[]])
+                embedding = embeddings[0] if embeddings else []
+                input_tokens = 0
+            else:
+                embedding = response_body.get("embedding", [])
+                input_tokens = response_body.get("inputTextTokenCount", 0)
 
             return EmbeddingResponse(
                 embedding=embedding,
