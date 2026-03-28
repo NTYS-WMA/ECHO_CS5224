@@ -133,6 +133,78 @@ class TemplateGenerationRequest(BaseModel):
 
 
 # ------------------------------------------------------------------ #
+# Tool Completion Request
+# ------------------------------------------------------------------ #
+
+
+class ToolDefinition(BaseModel):
+    """A tool definition in OpenAI function-calling format."""
+
+    type: str = Field(
+        "function",
+        description="Tool type, currently always 'function'.",
+    )
+    function: Dict[str, Any] = Field(
+        ...,
+        description=(
+            "Function definition with 'name', 'description', and 'parameters' keys. "
+            "Parameters should follow JSON Schema format."
+        ),
+        examples=[{
+            "name": "extract_entities",
+            "description": "Extract entities from text.",
+            "parameters": {
+                "type": "object",
+                "properties": {"entities": {"type": "array", "items": {"type": "object"}}},
+                "required": ["entities"],
+            },
+        }],
+    )
+
+
+class ToolCompletionRequest(BaseModel):
+    """
+    Request body for POST /api/v1/generation/tool-completion.
+
+    Invokes the AI provider with tool/function-calling support.
+    The model may return tool calls instead of (or in addition to) text.
+
+    Source: Memory Service (graph memory operations, entity extraction, etc.)
+    """
+
+    user_id: str = Field(
+        ...,
+        description="Internal user identifier.",
+        examples=["memory-service"],
+    )
+    messages: List[MessageItem] = Field(
+        ...,
+        min_length=1,
+        description="Ordered list of conversation messages including system prompt.",
+    )
+    tools: List[ToolDefinition] = Field(
+        ...,
+        min_length=1,
+        description="List of tool definitions the model can call.",
+    )
+    tool_choice: str = Field(
+        "auto",
+        description=(
+            "Tool selection strategy: 'auto' (model decides), "
+            "'any' (must call a tool), or 'none' (no tool use)."
+        ),
+    )
+    generation_config: Optional[GenerationConfig] = Field(
+        None,
+        description="Optional generation hyperparameters.",
+    )
+    correlation_id: Optional[str] = Field(
+        None,
+        description="Correlation ID for distributed tracing.",
+    )
+
+
+# ------------------------------------------------------------------ #
 # Embedding Request
 # ------------------------------------------------------------------ #
 

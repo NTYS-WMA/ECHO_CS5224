@@ -30,6 +30,7 @@ from ..models.requests import (
     ProactiveMessageRequest,
     SummaryGenerationRequest,
     TemplateGenerationRequest,
+    ToolCompletionRequest,
 )
 from ..models.responses import (
     ChatCompletionResponse,
@@ -38,6 +39,8 @@ from ..models.responses import (
     OutputItem,
     ProactiveMessageResponse,
     SummaryGenerationResponse,
+    ToolCallItem as ResponseToolCallItem,
+    ToolCallResponse,
     UsageInfo,
 )
 from ..utils.helpers import generate_event_id, generate_response_id
@@ -168,6 +171,81 @@ class GenerationService:
 
         await self._publish_completed_event(
             operation=f"execute:{template_id}",
+            user_id=request.user_id,
+            model=provider_response.model,
+            usage={
+                "input_tokens": provider_response.input_tokens,
+                "output_tokens": provider_response.output_tokens,
+            },
+            correlation_id=request.correlation_id,
+        )
+
+        return response
+
+    # ================================================================== #
+    # TOOL CALLING INTERFACE
+    # ================================================================== #
+
+    async def execute_with_tools(
+        self, request: ToolCompletionRequest
+    ) -> ToolCallResponse:
+        """
+        Execute a generation request with tool/function-calling support.
+
+        The caller provides messages and tool definitions. The AI model may
+        return tool calls (structured function invocations) instead of or
+        in addition to text content.
+
+        Args:
+            request: The tool completion request with messages and tools.
+
+        Returns:
+            ToolCallResponse with optional content and tool calls.
+
+        Raises:
+            GenerationError: If all provider attempts fail.
+        """
+        messages = [m.model_dump() for m in request.messages]
+        tools = [t.model_dump() for t in request.tools]
+
+        temperature = self._resolve_param(
+            request.generation_config.temperature if request.generation_config else None,
+            None,
+            self._settings.DEFAULT_TEMPERATURE,
+        )
+        max_tokens = self._resolve_param(
+            request.generation_config.max_tokens if request.generation_config else None,
+            None,
+            self._settings.DEFAULT_MAX_TOKENS,
+        )
+
+        provider_response = await self._invoke_tools_with_retry_and_fallback(
+            messages=messages,
+            tools=tools,
+            tool_choice=request.tool_choice,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            operation="tool_completion",
+            user_id=request.user_id,
+            correlation_id=request.correlation_id,
+        )
+
+        response = ToolCallResponse(
+            response_id=generate_response_id(),
+            content=provider_response.content,
+            tool_calls=[
+                ResponseToolCallItem(name=tc.name, arguments=tc.arguments)
+                for tc in provider_response.tool_calls
+            ],
+            model=provider_response.model,
+            usage=UsageInfo(
+                input_tokens=provider_response.input_tokens,
+                output_tokens=provider_response.output_tokens,
+            ),
+        )
+
+        await self._publish_completed_event(
+            operation="tool_completion",
             user_id=request.user_id,
             model=provider_response.model,
             usage={
@@ -633,6 +711,115 @@ class GenerationService:
                     temperature=temperature,
                     max_tokens=max_tokens,
                     stop_sequences=stop_sequences,
+                )
+            except (ProviderTimeoutError, ProviderError) as e:
+                last_error = e
+                logger.error("Fallback provider also failed: %s", str(e))
+
+        error_code = (
+            "PROVIDER_TIMEOUT"
+            if isinstance(last_error, ProviderTimeoutError)
+            else "PROVIDER_ERROR"
+        )
+
+        await self._publish_failed_event(
+            operation=operation,
+            user_id=user_id,
+            error_code=error_code,
+            retryable=isinstance(last_error, ProviderTimeoutError),
+            fallback_attempted=fallback_attempted,
+            correlation_id=correlation_id,
+        )
+
+        raise GenerationError(
+            error_code=error_code,
+            message=str(last_error),
+            retryable=isinstance(last_error, ProviderTimeoutError),
+        )
+
+    async def _invoke_tools_with_retry_and_fallback(
+        self,
+        messages: List[dict],
+        tools: List[dict],
+        tool_choice: str,
+        temperature: float,
+        max_tokens: int,
+        operation: str,
+        user_id: str,
+        correlation_id: Optional[str],
+    ):
+        """
+        Invoke generate_with_tools on the primary provider with retry, then fallback.
+
+        Returns:
+            ProviderToolResponse from whichever provider succeeds.
+
+        Raises:
+            GenerationError: If all attempts fail.
+        """
+        last_error = None
+        fallback_attempted = False
+
+        for attempt in range(1, self._settings.MAX_RETRY_ATTEMPTS + 1):
+            try:
+                logger.info(
+                    "Invoking primary provider '%s' for %s (attempt %d/%d)",
+                    self._primary.provider_name,
+                    operation,
+                    attempt,
+                    self._settings.MAX_RETRY_ATTEMPTS,
+                )
+                return await self._primary.generate_with_tools(
+                    messages=messages,
+                    tools=tools,
+                    tool_choice=tool_choice,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            except ProviderTimeoutError as e:
+                last_error = e
+                logger.warning(
+                    "Primary provider timeout on attempt %d: %s", attempt, str(e)
+                )
+                if attempt < self._settings.MAX_RETRY_ATTEMPTS:
+                    backoff = self._settings.RETRY_BACKOFF_BASE_SECONDS * (
+                        2 ** (attempt - 1)
+                    )
+                    await asyncio.sleep(backoff)
+            except ProviderError as e:
+                last_error = e
+                logger.warning(
+                    "Primary provider error on attempt %d: %s", attempt, str(e)
+                )
+                if attempt < self._settings.MAX_RETRY_ATTEMPTS:
+                    backoff = self._settings.RETRY_BACKOFF_BASE_SECONDS * (
+                        2 ** (attempt - 1)
+                    )
+                    await asyncio.sleep(backoff)
+
+        if self._fallback and (
+            (
+                isinstance(last_error, ProviderTimeoutError)
+                and self._settings.FALLBACK_ON_TIMEOUT
+            )
+            or (
+                isinstance(last_error, ProviderError)
+                and self._settings.FALLBACK_ON_PROVIDER_ERROR
+            )
+        ):
+            fallback_attempted = True
+            try:
+                logger.info(
+                    "Falling back to provider '%s' for %s",
+                    self._fallback.provider_name,
+                    operation,
+                )
+                return await self._fallback.generate_with_tools(
+                    messages=messages,
+                    tools=tools,
+                    tool_choice=tool_choice,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
                 )
             except (ProviderTimeoutError, ProviderError) as e:
                 last_error = e
