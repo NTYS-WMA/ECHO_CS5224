@@ -19,8 +19,11 @@ class Settings(BaseSettings):
     mongodb_database: str = Field(alias="MONGODB_DATABASE")
     mongo_profile_collection: str = Field(default="user_additional_profile", alias="MONGO_PROFILE_COLLECTION")
 
+    auth_enabled: bool = Field(default=False, alias="AUTH_ENABLED")
+    api_key: str | None = Field(default=None, alias="API_KEY")
+    admin_api_key: str | None = Field(default=None, alias="ADMIN_API_KEY")
+
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

@@ -45,6 +45,12 @@ class MessageCreateRequest(BaseModel):
     created_at: Optional[datetime] = None
 
 
+class MessageUpdateRequest(BaseModel):
+    role: Optional[str] = None
+    content: Optional[str] = None
+    is_proactive: Optional[bool] = None
+
+
 class MessageItem(BaseModel):
     id: int
     user_id: str
@@ -167,6 +173,17 @@ async def upsert_user(user_id: str, request: UserUpsertRequest):
         )
 
 
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: str):
+    session_maker = get_postgres_session_maker()
+    async with session_maker() as session:
+        deleted = await relationship_repo.delete_user(session, user_id)
+        await session.commit()
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"success": True, "user_id": user_id}
+
+
 @router.post("/messages", response_model=MessageItem)
 async def create_message(request: MessageCreateRequest):
     session_maker = get_postgres_session_maker()
@@ -218,6 +235,62 @@ async def get_messages(
             for row in rows
         ]
         return {"results": results}
+
+
+@router.get("/messages/{message_id}", response_model=MessageItem)
+async def get_message(message_id: int):
+    session_maker = get_postgres_session_maker()
+    async with session_maker() as session:
+        row = await relationship_repo.get_message_by_id(session, message_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Message not found")
+        return MessageItem(
+            id=row["id"],
+            user_id=row["user_id"],
+            role=row.get("role"),
+            content=row.get("content"),
+            is_proactive=row.get("is_proactive", False),
+            created_at=row["created_at"].isoformat(),
+        )
+
+
+@router.put("/messages/{message_id}", response_model=MessageItem)
+async def update_message(message_id: int, request: MessageUpdateRequest):
+    if request.role is None and request.content is None and request.is_proactive is None:
+        raise HTTPException(status_code=400, detail="No message fields provided for update")
+
+    session_maker = get_postgres_session_maker()
+    async with session_maker() as session:
+        row = await relationship_repo.update_message(
+            session,
+            message_id=message_id,
+            role=request.role,
+            content=request.content,
+            is_proactive=request.is_proactive,
+        )
+        await session.commit()
+        if not row:
+            raise HTTPException(status_code=404, detail="Message not found")
+
+        return MessageItem(
+            id=row["id"],
+            user_id=row["user_id"],
+            role=row.get("role"),
+            content=row.get("content"),
+            is_proactive=row.get("is_proactive", False),
+            created_at=row["created_at"].isoformat(),
+        )
+
+
+@router.delete("/messages/{message_id}")
+async def delete_message(message_id: int):
+    session_maker = get_postgres_session_maker()
+    async with session_maker() as session:
+        deleted = await relationship_repo.delete_message(session, message_id)
+        await session.commit()
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return {"success": True, "message_id": message_id}
 
 
 @router.get("/scores/{user_id}", response_model=ScoreResponse)
@@ -272,6 +345,17 @@ async def upsert_score(user_id: str, request: ScoreUpsertRequest):
             last_decay_at=row["last_decay_at"].isoformat() if row.get("last_decay_at") else None,
             last_updated=row["last_updated"].isoformat() if row.get("last_updated") else None,
         )
+
+
+@router.delete("/scores/{user_id}")
+async def delete_score(user_id: str):
+    session_maker = get_postgres_session_maker()
+    async with session_maker() as session:
+        deleted = await relationship_repo.delete_score(session, user_id)
+        await session.commit()
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Relationship score not found")
+    return {"success": True, "user_id": user_id}
 
 
 @router.post("/scores/{user_id}/history", response_model=ScoreHistoryItem)
@@ -333,3 +417,25 @@ async def get_score_history(
             for row in rows
         ]
         return {"results": results}
+
+
+@router.delete("/scores/{user_id}/history/{history_id}")
+async def delete_score_history_item(user_id: str, history_id: int):
+    session_maker = get_postgres_session_maker()
+    async with session_maker() as session:
+        deleted = await relationship_repo.delete_score_history_item(session, user_id=user_id, history_id=history_id)
+        await session.commit()
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Score history item not found")
+    return {"success": True, "user_id": user_id, "history_id": history_id}
+
+
+@router.delete("/scores/{user_id}/history")
+async def delete_score_history(user_id: str):
+    session_maker = get_postgres_session_maker()
+    async with session_maker() as session:
+        deleted = await relationship_repo.delete_score_history(session, user_id=user_id)
+        await session.commit()
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Score history not found")
+    return {"success": True, "user_id": user_id, "deleted_count": deleted}

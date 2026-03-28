@@ -19,6 +19,11 @@ class RelationshipRepository:
         row = result.mappings().first()
         return dict(row) if row else None
 
+    async def delete_user(self, session: AsyncSession, user_id: str) -> int:
+        query = text("DELETE FROM users WHERE id = :user_id")
+        result = await session.execute(query, {"user_id": user_id})
+        return result.rowcount or 0
+
     async def upsert_user(
         self,
         session: AsyncSession,
@@ -122,6 +127,59 @@ class RelationshipRepository:
         row = result.mappings().first()
         return dict(row) if row else {}
 
+    async def get_message_by_id(self, session: AsyncSession, message_id: int) -> dict[str, Any] | None:
+        query = text(
+            """
+            SELECT id, user_id, role, content, is_proactive, created_at
+            FROM messages
+            WHERE id = :message_id
+            """
+        )
+        result = await session.execute(query, {"message_id": message_id})
+        row = result.mappings().first()
+        return dict(row) if row else None
+
+    async def update_message(
+        self,
+        session: AsyncSession,
+        message_id: int,
+        role: str | None = None,
+        content: str | None = None,
+        is_proactive: bool | None = None,
+    ) -> dict[str, Any] | None:
+        updates: list[str] = []
+        params: dict[str, Any] = {"message_id": message_id}
+
+        if role is not None:
+            updates.append("role = :role")
+            params["role"] = role
+        if content is not None:
+            updates.append("content = :content")
+            params["content"] = content
+        if is_proactive is not None:
+            updates.append("is_proactive = :is_proactive")
+            params["is_proactive"] = is_proactive
+
+        if not updates:
+            return await self.get_message_by_id(session, message_id)
+
+        query = text(
+            f"""
+            UPDATE messages
+            SET {", ".join(updates)}
+            WHERE id = :message_id
+            RETURNING id, user_id, role, content, is_proactive, created_at
+            """
+        )
+        result = await session.execute(query, params)
+        row = result.mappings().first()
+        return dict(row) if row else None
+
+    async def delete_message(self, session: AsyncSession, message_id: int) -> int:
+        query = text("DELETE FROM messages WHERE id = :message_id")
+        result = await session.execute(query, {"message_id": message_id})
+        return result.rowcount or 0
+
     async def get_messages_since(
         self,
         session: AsyncSession,
@@ -200,6 +258,11 @@ class RelationshipRepository:
             },
         )
 
+    async def delete_score(self, session: AsyncSession, user_id: str) -> int:
+        query = text("DELETE FROM relationship_scores WHERE user_id = :user_id")
+        result = await session.execute(query, {"user_id": user_id})
+        return result.rowcount or 0
+
     async def append_score_history(
         self,
         session: AsyncSession,
@@ -254,3 +317,18 @@ class RelationshipRepository:
         )
         result = await session.execute(query, {"user_id": user_id, "limit": limit})
         return [dict(row) for row in result.mappings()]
+
+    async def delete_score_history_item(self, session: AsyncSession, user_id: str, history_id: int) -> int:
+        query = text(
+            """
+            DELETE FROM score_history
+            WHERE id = :history_id AND user_id = :user_id
+            """
+        )
+        result = await session.execute(query, {"history_id": history_id, "user_id": user_id})
+        return result.rowcount or 0
+
+    async def delete_score_history(self, session: AsyncSession, user_id: str) -> int:
+        query = text("DELETE FROM score_history WHERE user_id = :user_id")
+        result = await session.execute(query, {"user_id": user_id})
+        return result.rowcount or 0
