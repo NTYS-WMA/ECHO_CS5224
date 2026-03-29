@@ -49,8 +49,8 @@ class Settings(BaseSettings):
     EVENT_PUBLISH_ENABLED: bool = True
 
     # Retry and fallback policy
-    MAX_RETRY_ATTEMPTS: int = 2
-    RETRY_BACKOFF_BASE_SECONDS: float = 0.5
+    MAX_RETRY_ATTEMPTS: int = 5
+    RETRY_BACKOFF_BASE_SECONDS: float = 1.0
     FALLBACK_ON_TIMEOUT: bool = True
     FALLBACK_ON_PROVIDER_ERROR: bool = True
 
