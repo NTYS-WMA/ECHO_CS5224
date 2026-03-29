@@ -17,6 +17,7 @@ Falls back to in-memory when MOCK_SERVICES=true or db-manager is unavailable.
 
 import logging
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
@@ -64,7 +65,9 @@ async def ensure_user_registered(
 
     try:
         client = _get_client()
-        payload: dict[str, Any] = {}
+        payload: dict[str, Any] = {
+            "last_active_at": datetime.now(timezone.utc).isoformat(),
+        }
         if telegram_id is not None:
             payload["telegram_id"] = telegram_id
         if first_name:
