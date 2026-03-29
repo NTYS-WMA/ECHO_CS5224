@@ -34,8 +34,12 @@ _in_memory_store: dict[str, list[dict[str, Any]]] = defaultdict(list)
 def _get_client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is None or _http_client.is_closed:
+        headers = {}
+        if settings.db_manager_api_key:
+            headers["X-API-Key"] = settings.db_manager_api_key
         _http_client = httpx.AsyncClient(
             base_url=settings.db_manager_url,
+            headers=headers,
             timeout=10.0,
         )
     return _http_client
