@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     # ── DB Manager Service ────────────────────────────────────────────────────
     db_manager_url: str = "http://localhost:18087"
+    db_manager_api_key: str = ""
 
     # ── Application ───────────────────────────────────────────────────────────
     app_env: str = "development"
