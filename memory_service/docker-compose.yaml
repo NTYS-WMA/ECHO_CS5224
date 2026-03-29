@@ -82,6 +82,7 @@ services:
         condition: service_healthy
     networks:
       - mem0_network
+      - ai_gen_network
     restart: unless-stopped
     command: uvicorn main:app --host 0.0.0.0 --port 8000
 
@@ -133,3 +134,6 @@ volumes:
 networks:
   mem0_network:
     driver: bridge
+  ai_gen_network:
+    external: true
+    name: ai_generation_service_default
