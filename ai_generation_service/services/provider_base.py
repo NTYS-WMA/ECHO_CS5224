@@ -139,6 +139,11 @@ class ProviderTimeoutError(Exception):
     pass
 
 
+class ProviderThrottleError(Exception):
+    """Raised when the AI provider returns a throttling/rate-limit response (429)."""
+    pass
+
+
 class ProviderError(Exception):
     """Raised for general AI provider failures."""
     pass

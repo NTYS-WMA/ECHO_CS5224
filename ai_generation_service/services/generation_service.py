@@ -44,7 +44,7 @@ from ..models.responses import (
     UsageInfo,
 )
 from ..utils.helpers import generate_event_id, generate_response_id
-from .provider_base import AIProviderBase, ProviderError, ProviderTimeoutError
+from .provider_base import AIProviderBase, ProviderError, ProviderThrottleError, ProviderTimeoutError
 from .template_renderer import TemplateRenderer, TemplateRenderError
 
 logger = logging.getLogger(__name__)
@@ -310,6 +310,12 @@ class GenerationService:
 
                 return response
 
+            except ProviderThrottleError as e:
+                last_error = e
+                logger.warning("Embedding provider throttled on attempt %d: %s", attempt, str(e))
+                if attempt < self._settings.MAX_RETRY_ATTEMPTS:
+                    backoff = self._settings.RETRY_BACKOFF_BASE_SECONDS * 2 * (2 ** (attempt - 1))
+                    await asyncio.sleep(backoff)
             except ProviderTimeoutError as e:
                 last_error = e
                 logger.warning("Embedding provider timeout on attempt %d: %s", attempt, str(e))
@@ -326,7 +332,7 @@ class GenerationService:
         # Try fallback if configured
         if self._fallback and (
             (isinstance(last_error, ProviderTimeoutError) and self._settings.FALLBACK_ON_TIMEOUT)
-            or (isinstance(last_error, ProviderError) and self._settings.FALLBACK_ON_PROVIDER_ERROR)
+            or (isinstance(last_error, (ProviderError, ProviderThrottleError)) and self._settings.FALLBACK_ON_PROVIDER_ERROR)
         ):
             try:
                 logger.info("Falling back to provider '%s' for embedding", self._fallback.provider_name)
@@ -353,13 +359,15 @@ class GenerationService:
 
                 return response
 
-            except (ProviderTimeoutError, ProviderError) as e:
+            except (ProviderTimeoutError, ProviderThrottleError, ProviderError) as e:
                 last_error = e
                 logger.error("Fallback embedding also failed: %s", str(e))
 
         error_code = (
             "PROVIDER_TIMEOUT"
             if isinstance(last_error, ProviderTimeoutError)
+            else "PROVIDER_THROTTLE"
+            if isinstance(last_error, ProviderThrottleError)
             else "PROVIDER_ERROR"
         )
 
@@ -367,7 +375,7 @@ class GenerationService:
             operation="embedding",
             user_id=request.user_id,
             error_code=error_code,
-            retryable=isinstance(last_error, ProviderTimeoutError),
+            retryable=isinstance(last_error, (ProviderTimeoutError, ProviderThrottleError)),
             fallback_attempted=self._fallback is not None,
             correlation_id=request.correlation_id,
         )
@@ -375,7 +383,7 @@ class GenerationService:
         raise GenerationError(
             error_code=error_code,
             message=str(last_error),
-            retryable=isinstance(last_error, ProviderTimeoutError),
+            retryable=isinstance(last_error, (ProviderTimeoutError, ProviderThrottleError)),
         )
 
     # ================================================================== #
@@ -668,6 +676,18 @@ class GenerationService:
                     max_tokens=max_tokens,
                     stop_sequences=stop_sequences,
                 )
+            except ProviderThrottleError as e:
+                last_error = e
+                logger.warning(
+                    "Primary provider throttled on attempt %d: %s", attempt, str(e)
+                )
+                if attempt < self._settings.MAX_RETRY_ATTEMPTS:
+                    # Use longer backoff for throttling (2x base)
+                    backoff = self._settings.RETRY_BACKOFF_BASE_SECONDS * 2 * (
+                        2 ** (attempt - 1)
+                    )
+                    logger.info("Throttle backoff %.1fs before attempt %d", backoff, attempt + 1)
+                    await asyncio.sleep(backoff)
             except ProviderTimeoutError as e:
                 last_error = e
                 logger.warning(
@@ -695,7 +715,7 @@ class GenerationService:
                 and self._settings.FALLBACK_ON_TIMEOUT
             )
             or (
-                isinstance(last_error, ProviderError)
+                isinstance(last_error, (ProviderError, ProviderThrottleError))
                 and self._settings.FALLBACK_ON_PROVIDER_ERROR
             )
         ):
@@ -712,13 +732,15 @@ class GenerationService:
                     max_tokens=max_tokens,
                     stop_sequences=stop_sequences,
                 )
-            except (ProviderTimeoutError, ProviderError) as e:
+            except (ProviderTimeoutError, ProviderThrottleError, ProviderError) as e:
                 last_error = e
                 logger.error("Fallback provider also failed: %s", str(e))
 
         error_code = (
             "PROVIDER_TIMEOUT"
             if isinstance(last_error, ProviderTimeoutError)
+            else "PROVIDER_THROTTLE"
+            if isinstance(last_error, ProviderThrottleError)
             else "PROVIDER_ERROR"
         )
 
@@ -726,7 +748,7 @@ class GenerationService:
             operation=operation,
             user_id=user_id,
             error_code=error_code,
-            retryable=isinstance(last_error, ProviderTimeoutError),
+            retryable=isinstance(last_error, (ProviderTimeoutError, ProviderThrottleError)),
             fallback_attempted=fallback_attempted,
             correlation_id=correlation_id,
         )
@@ -734,7 +756,7 @@ class GenerationService:
         raise GenerationError(
             error_code=error_code,
             message=str(last_error),
-            retryable=isinstance(last_error, ProviderTimeoutError),
+            retryable=isinstance(last_error, (ProviderTimeoutError, ProviderThrottleError)),
         )
 
     async def _invoke_tools_with_retry_and_fallback(
@@ -776,6 +798,17 @@ class GenerationService:
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
+            except ProviderThrottleError as e:
+                last_error = e
+                logger.warning(
+                    "Primary provider throttled on attempt %d: %s", attempt, str(e)
+                )
+                if attempt < self._settings.MAX_RETRY_ATTEMPTS:
+                    backoff = self._settings.RETRY_BACKOFF_BASE_SECONDS * 2 * (
+                        2 ** (attempt - 1)
+                    )
+                    logger.info("Throttle backoff %.1fs before attempt %d", backoff, attempt + 1)
+                    await asyncio.sleep(backoff)
             except ProviderTimeoutError as e:
                 last_error = e
                 logger.warning(
@@ -803,7 +836,7 @@ class GenerationService:
                 and self._settings.FALLBACK_ON_TIMEOUT
             )
             or (
-                isinstance(last_error, ProviderError)
+                isinstance(last_error, (ProviderError, ProviderThrottleError))
                 and self._settings.FALLBACK_ON_PROVIDER_ERROR
             )
         ):
@@ -821,13 +854,15 @@ class GenerationService:
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
-            except (ProviderTimeoutError, ProviderError) as e:
+            except (ProviderTimeoutError, ProviderThrottleError, ProviderError) as e:
                 last_error = e
                 logger.error("Fallback provider also failed: %s", str(e))
 
         error_code = (
             "PROVIDER_TIMEOUT"
             if isinstance(last_error, ProviderTimeoutError)
+            else "PROVIDER_THROTTLE"
+            if isinstance(last_error, ProviderThrottleError)
             else "PROVIDER_ERROR"
         )
 
@@ -835,7 +870,7 @@ class GenerationService:
             operation=operation,
             user_id=user_id,
             error_code=error_code,
-            retryable=isinstance(last_error, ProviderTimeoutError),
+            retryable=isinstance(last_error, (ProviderTimeoutError, ProviderThrottleError)),
             fallback_attempted=fallback_attempted,
             correlation_id=correlation_id,
         )
@@ -843,7 +878,7 @@ class GenerationService:
         raise GenerationError(
             error_code=error_code,
             message=str(last_error),
-            retryable=isinstance(last_error, ProviderTimeoutError),
+            retryable=isinstance(last_error, (ProviderTimeoutError, ProviderThrottleError)),
         )
 
     # ================================================================== #
