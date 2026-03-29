@@ -43,9 +43,14 @@ def get_generation_service() -> GenerationService:
 
 def _handle_generation_error(e: GenerationError, correlation_id=None):
     """Map a GenerationError to an appropriate HTTP exception."""
-    status_code = 503 if e.retryable else 500
     if e.error_code == "TEMPLATE_RENDER_ERROR":
         status_code = 400
+    elif e.error_code == "PROVIDER_THROTTLE":
+        status_code = 429
+    elif e.retryable:
+        status_code = 503
+    else:
+        status_code = 500
     raise HTTPException(
         status_code=status_code,
         detail=ErrorResponse(
