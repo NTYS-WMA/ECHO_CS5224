@@ -6,6 +6,7 @@ POST /api/v1/generation/execute  (template_id: tpl_chat_completion, messages mod
 Falls back to a simple echo-style mock when MOCK_SERVICES=true.
 """
 
+import asyncio
 import logging
 import uuid
 from typing import Any, Optional
@@ -24,7 +25,7 @@ def _get_client() -> httpx.AsyncClient:
     if _http_client is None or _http_client.is_closed:
         _http_client = httpx.AsyncClient(
             base_url=settings.ai_generation_service_url,
-            timeout=30.0,  # LLM calls can be slow
+            timeout=60.0,  # LLM calls via Bedrock can be slow
         )
     return _http_client
 
@@ -105,19 +106,34 @@ async def generate_chat_completion(
         "correlation_id": correlation_id,
     }
 
-    try:
-        client = _get_client()
-        resp = await client.post("/api/v1/generation/execute", json=payload)
-        resp.raise_for_status()
-        result = resp.json()
-        logger.info(
-            "AI generation complete for %s — model=%s tokens_in=%d tokens_out=%d",
-            user_id,
-            result.get("model", "?"),
-            result.get("usage", {}).get("input_tokens", 0),
-            result.get("usage", {}).get("output_tokens", 0),
-        )
-        return result
-    except Exception:
-        logger.exception("AI generation failed for %s", user_id)
-        return None
+    max_attempts = 3
+    backoff = 3.0  # seconds; doubles each retry
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            client = _get_client()
+            resp = await client.post("/api/v1/generation/execute", json=payload)
+            resp.raise_for_status()
+            result = resp.json()
+            logger.info(
+                "AI generation complete for %s — model=%s tokens_in=%d tokens_out=%d",
+                user_id,
+                result.get("model", "?"),
+                result.get("usage", {}).get("input_tokens", 0),
+                result.get("usage", {}).get("output_tokens", 0),
+            )
+            return result
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 500 and attempt < max_attempts:
+                wait = backoff * (2 ** (attempt - 1))  # 3s, 6s
+                logger.warning(
+                    "AI generation 500 for %s (attempt %d/%d) — retrying in %.0fs",
+                    user_id, attempt, max_attempts, wait,
+                )
+                await asyncio.sleep(wait)
+            else:
+                logger.exception("AI generation failed for %s after %d attempt(s)", user_id, attempt)
+                return None
+        except Exception:
+            logger.exception("AI generation failed for %s", user_id)
+            return None
