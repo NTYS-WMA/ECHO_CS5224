@@ -98,6 +98,20 @@ async def get_relationship_score(user_id: str) -> Optional[dict]:
         return r.json()
 
 
+async def create_relationship_score(user_id: str) -> dict:
+    """Create a default relationship score record for a new user."""
+    payload = {
+        "score": 0.10,
+        "total_interactions": 0,
+        "positive_interactions": 0,
+        "negative_interactions": 0,
+    }
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.put(f"{_BASE}/scores/{user_id}", json=payload, headers=_HEADERS)
+        r.raise_for_status()
+        return r.json()
+
+
 async def update_relationship_score(
     user_id: str,
     delta: float,
