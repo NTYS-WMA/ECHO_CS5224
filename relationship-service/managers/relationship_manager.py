@@ -142,10 +142,14 @@ def _publish_score_event(
 
 
 async def get_relationship_context(user_id: str) -> Optional[dict]:
-    """Return relationship context for a user, or None if no record exists."""
+    """Return relationship context for a user. Auto-creates score record on first access."""
     rel = await db_manager.get_relationship_score(user_id)
     if not rel:
-        return None
+        user = await db_manager.get_user_by_id(user_id)
+        if user is None:
+            return None
+        rel = await db_manager.create_relationship_score(user_id)
+        logger.info("Created default relationship score for new user %s", user_id)
 
     user = await db_manager.get_user_by_id(user_id)
     now = datetime.now(timezone.utc)
