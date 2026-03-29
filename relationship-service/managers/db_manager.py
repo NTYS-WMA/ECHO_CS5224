@@ -18,6 +18,7 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 _BASE = f"{settings.db_manager_url}/relationship-db"
+_HEADERS = {"X-API-Key": settings.db_manager_api_key} if settings.db_manager_api_key else {}
 
 
 # ─── Internal helper ──────────────────────────────────────────────────────────
@@ -25,7 +26,7 @@ _BASE = f"{settings.db_manager_url}/relationship-db"
 
 async def _put_score(user_id: str, payload: dict) -> None:
     async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.put(f"{_BASE}/scores/{user_id}", json=payload)
+        r = await client.put(f"{_BASE}/scores/{user_id}", json=payload, headers=_HEADERS)
         r.raise_for_status()
 
 
@@ -34,7 +35,7 @@ async def _put_score(user_id: str, payload: dict) -> None:
 
 async def get_user_by_id(user_id: str) -> Optional[dict]:
     async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(f"{_BASE}/users/{user_id}")
+        r = await client.get(f"{_BASE}/users/{user_id}", headers=_HEADERS)
         if r.status_code == 404:
             return None
         r.raise_for_status()
@@ -50,6 +51,7 @@ async def get_users_with_ended_sessions(inactive_minutes: int = 30) -> list[dict
         r = await client.get(
             f"{_BASE}/users/ended-sessions",
             params={"inactive_minutes": inactive_minutes},
+            headers=_HEADERS,
         )
         r.raise_for_status()
         return r.json()["results"]
@@ -61,6 +63,7 @@ async def get_inactive_users(inactive_hours: int) -> list[dict]:
         r = await client.get(
             f"{_BASE}/users/inactive",
             params={"inactive_hours": inactive_hours},
+            headers=_HEADERS,
         )
         r.raise_for_status()
         return r.json()["results"]
@@ -78,7 +81,7 @@ async def get_messages_since_datetime(
     if since is not None:
         params["since"] = since.isoformat()
     async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(f"{_BASE}/messages", params=params)
+        r = await client.get(f"{_BASE}/messages", params=params, headers=_HEADERS)
         r.raise_for_status()
         return r.json()["results"]
 
@@ -88,7 +91,7 @@ async def get_messages_since_datetime(
 
 async def get_relationship_score(user_id: str) -> Optional[dict]:
     async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(f"{_BASE}/scores/{user_id}")
+        r = await client.get(f"{_BASE}/scores/{user_id}", headers=_HEADERS)
         if r.status_code == 404:
             return None
         r.raise_for_status()
@@ -174,7 +177,7 @@ async def insert_score_history(
         "reasoning": reasoning,
     }
     async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.post(f"{_BASE}/scores/{user_id}/history", json=payload)
+        r = await client.post(f"{_BASE}/scores/{user_id}/history", json=payload, headers=_HEADERS)
         r.raise_for_status()
 
 
