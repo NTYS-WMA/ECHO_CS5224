@@ -51,6 +51,7 @@ class GenerationServiceLLM(LLMBase):
         self._service_url = raw.get("service_url", "http://localhost:8003").rstrip("/")
         self._temperature = raw.get("temperature", 0.2)
         self._max_tokens = raw.get("max_tokens", 2000)
+        self._actual_template_id = PASSTHROUGH_TEMPLATE_ID  # may be overwritten by _register_template
 
         # Fallback DeepSeek client (used when service unavailable)
         self._fallback = self._build_fallback(raw)
@@ -87,10 +88,24 @@ class GenerationServiceLLM(LLMBase):
         try:
             resp = requests.post(url, json=PASSTHROUGH_TEMPLATE, timeout=10)
             if resp.status_code in (200, 201):
-                logger.info(f"GenerationServiceLLM: passthrough template registered ({resp.status_code})")
+                actual_id = resp.json().get("template_id")
+                if actual_id:
+                    self._actual_template_id = actual_id
+                logger.info(f"GenerationServiceLLM: passthrough template registered, id={self._actual_template_id}")
                 return True
             if resp.status_code == 409:
-                logger.info("GenerationServiceLLM: passthrough template already exists, reusing.")
+                # Template already registered; look up the actual ID assigned by the service
+                list_resp = requests.get(
+                    f"{self._service_url}/api/v1/templates",
+                    params={"owner": PASSTHROUGH_TEMPLATE["owner"]},
+                    timeout=10,
+                )
+                if list_resp.status_code == 200:
+                    for tpl in list_resp.json().get("templates", []):
+                        if tpl.get("name") == PASSTHROUGH_TEMPLATE["name"]:
+                            self._actual_template_id = tpl["template_id"]
+                            break
+                logger.info(f"GenerationServiceLLM: passthrough template already exists, id={self._actual_template_id}")
                 return True
             logger.error(
                 f"GenerationServiceLLM: template registration failed "
@@ -206,7 +221,7 @@ class GenerationServiceLLM(LLMBase):
 
         payload = {
             "user_id": "memory-service",
-            "template_id": PASSTHROUGH_TEMPLATE_ID,
+            "template_id": self._actual_template_id,
             "messages": messages,
             "generation_config": {
                 "temperature": self._temperature,
