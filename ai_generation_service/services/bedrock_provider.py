@@ -18,6 +18,7 @@ from .provider_base import (
     EmbeddingResponse,
     ProviderError,
     ProviderResponse,
+    ProviderThrottleError,
     ProviderTimeoutError,
     ProviderToolResponse,
     ToolCallItem,
@@ -178,6 +179,11 @@ class BedrockProvider(AIProviderBase):
             )
         except Exception as e:
             error_msg = str(e)
+            error_name = type(e).__name__
+            # Detect Bedrock throttling (ThrottlingException / TooManyRequestsException)
+            if "Throttling" in error_name or "TooManyRequests" in error_name or "throttl" in error_msg.lower():
+                logger.warning("Bedrock throttled for model %s: %s", self._model_id, error_msg)
+                raise ProviderThrottleError(f"Bedrock throttled: {error_msg}")
             logger.error("Bedrock generation failed: %s", error_msg)
             raise ProviderError(f"Bedrock generation failed: {error_msg}")
 
@@ -307,6 +313,10 @@ class BedrockProvider(AIProviderBase):
             )
         except Exception as e:
             error_msg = str(e)
+            error_name = type(e).__name__
+            if "Throttling" in error_name or "TooManyRequests" in error_name or "throttl" in error_msg.lower():
+                logger.warning("Bedrock tool-calling throttled for model %s: %s", self._model_id, error_msg)
+                raise ProviderThrottleError(f"Bedrock tool-calling throttled: {error_msg}")
             logger.error("Bedrock tool-calling generation failed: %s", error_msg)
             raise ProviderError(f"Bedrock tool-calling generation failed: {error_msg}")
 
@@ -376,6 +386,10 @@ class BedrockProvider(AIProviderBase):
             )
         except Exception as e:
             error_msg = str(e)
+            error_name = type(e).__name__
+            if "Throttling" in error_name or "TooManyRequests" in error_name or "throttl" in error_msg.lower():
+                logger.warning("Bedrock embedding throttled for model %s: %s", self._embedding_model_id, error_msg)
+                raise ProviderThrottleError(f"Bedrock embedding throttled: {error_msg}")
             logger.error("Bedrock embedding failed: %s", error_msg)
             raise ProviderError(f"Bedrock embedding failed: {error_msg}")
 
