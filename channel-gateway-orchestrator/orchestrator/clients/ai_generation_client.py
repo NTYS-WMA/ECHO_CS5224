@@ -106,8 +106,11 @@ async def generate_chat_completion(
         "correlation_id": correlation_id,
     }
 
-    max_attempts = 3
-    backoff = 3.0  # seconds; doubles each retry
+    max_attempts = 5
+    backoff = 2.0  # seconds; doubles each retry
+
+    # HTTP status codes that are safe to retry
+    retryable_status_codes = {429, 500, 502, 503, 504}
 
     for attempt in range(1, max_attempts + 1):
         try:
@@ -124,16 +127,39 @@ async def generate_chat_completion(
             )
             return result
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 500 and attempt < max_attempts:
-                wait = backoff * (2 ** (attempt - 1))  # 3s, 6s
+            status = exc.response.status_code
+            if status in retryable_status_codes and attempt < max_attempts:
+                # Use longer backoff for throttling (429)
+                multiplier = 2.0 if status == 429 else 1.0
+                wait = backoff * multiplier * (2 ** (attempt - 1))
                 logger.warning(
-                    "AI generation 500 for %s (attempt %d/%d) — retrying in %.0fs",
-                    user_id, attempt, max_attempts, wait,
+                    "AI generation HTTP %d for %s (attempt %d/%d) — retrying in %.1fs",
+                    status, user_id, attempt, max_attempts, wait,
                 )
                 await asyncio.sleep(wait)
             else:
-                logger.exception("AI generation failed for %s after %d attempt(s)", user_id, attempt)
+                logger.error(
+                    "AI generation failed for %s — HTTP %d after %d attempt(s)",
+                    user_id, status, attempt,
+                )
+                return None
+        except (httpx.TimeoutException, httpx.ConnectError) as exc:
+            if attempt < max_attempts:
+                wait = backoff * (2 ** (attempt - 1))
+                logger.warning(
+                    "AI generation %s for %s (attempt %d/%d) — retrying in %.1fs",
+                    type(exc).__name__, user_id, attempt, max_attempts, wait,
+                )
+                await asyncio.sleep(wait)
+            else:
+                logger.error(
+                    "AI generation failed for %s — %s after %d attempt(s)",
+                    user_id, type(exc).__name__, attempt,
+                )
                 return None
         except Exception:
-            logger.exception("AI generation failed for %s", user_id)
-            return None
+            logger.exception("AI generation unexpected error for %s (attempt %d/%d)", user_id, attempt, max_attempts)
+            if attempt < max_attempts:
+                await asyncio.sleep(backoff * (2 ** (attempt - 1)))
+            else:
+                return None
