@@ -67,6 +67,7 @@ async def ensure_user_registered(
         client = _get_client()
         payload: dict[str, Any] = {
             "last_active_at": datetime.now(timezone.utc).isoformat(),
+            "onboarding_complete": True,
         }
         if telegram_id is not None:
             payload["telegram_id"] = telegram_id
