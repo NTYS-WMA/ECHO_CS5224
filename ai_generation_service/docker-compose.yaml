@@ -25,6 +25,12 @@ services:
 
       # Event broker (disabled - stub implementation)
       - AI_GEN_EVENT_PUBLISH_ENABLED=false
+
+      # DB Manager service for template persistence
+      - AI_GEN_DB_MANAGER_URL=http://host.docker.internal:18087
+      - AI_GEN_DB_MANAGER_API_KEY=echo-db-manager-service-2026
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
