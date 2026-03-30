@@ -98,6 +98,9 @@ async def complete(prompt: str, max_tokens: int = 1024) -> str:
     }
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(_EXECUTE_URL, json=payload)
+        if response.status_code == 400:
+            # Template may have been lost (AI service restarted). Force re-registration on next retry.
+            _template_id = None
         response.raise_for_status()
         data = response.json()
         return data["output"][0]["content"].strip()
