@@ -1,8 +1,16 @@
 import json
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def _parse_dt(value: Any) -> datetime:
+    """Convert a value to a datetime object. Accepts datetime or ISO string."""
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
 class TemplateRepository:
@@ -91,8 +99,8 @@ class TemplateRepository:
                 "variables": json.dumps(template.get("variables", {}), ensure_ascii=False),
                 "defaults": json.dumps(template["defaults"], ensure_ascii=False) if template.get("defaults") else None,
                 "tags": json.dumps(template.get("tags", []), ensure_ascii=False),
-                "created_at": template["created_at"],
-                "updated_at": template["updated_at"],
+                "created_at": _parse_dt(template["created_at"]),
+                "updated_at": _parse_dt(template["updated_at"]),
             },
         )
 
