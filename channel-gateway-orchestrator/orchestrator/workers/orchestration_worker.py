@@ -64,6 +64,11 @@ from shared.models.events import (
 
 logger = logging.getLogger(__name__)
 
+# Tracks the last activity per conversation for idle-based flush
+# { conversation_id: { last_seen, user_id, last_user_message, last_assistant_message, flushed } }
+_idle_tracker: dict[str, dict] = {}
+_IDLE_FLUSH_MINUTES = 5
+
 
 # =====================================================================
 # STEP 1 — Context Assembly (parallel where possible)
@@ -509,6 +514,15 @@ async def handle_inbound_message(event: dict[str, Any]) -> None:
         await event_bus.publish(MEMORY_SUMMARY_REQUESTED, summary_event.model_dump())
         logger.info("Triggered summarization for conv %s at length %d", conversation_id, conv_length)
 
+    # Update idle tracker — resets the 5-min close-up timer on each new message
+    _idle_tracker[conversation_id] = {
+        "last_seen": datetime.now(timezone.utc),
+        "user_id": user_id,
+        "last_user_message": message_content,
+        "last_assistant_message": full_reply_text,
+        "flushed": False,
+    }
+
     logger.info(
         "Orchestration complete — event=%s user=%s reply='%s'",
         event_id, user_id, full_reply_text[:80],
@@ -585,10 +599,49 @@ async def _publish_failure(event: dict, stage: str, error_code: str) -> None:
 
 
 # =====================================================================
+# Idle Flush Loop
+# =====================================================================
+
+async def _idle_flush_loop() -> None:
+    """
+    Background loop that fires every 60 seconds.
+
+    If a conversation has been silent for _IDLE_FLUSH_MINUTES (5 min),
+    flush memory and profile as a conversation close-up — even if the
+    turn-based threshold (every 10/20 messages) hasn't been reached.
+    """
+    while True:
+        await asyncio.sleep(60)
+        now = datetime.now(timezone.utc)
+        for conv_id, state in list(_idle_tracker.items()):
+            if state.get("flushed"):
+                continue
+            idle_seconds = (now - state["last_seen"]).total_seconds()
+            if idle_seconds >= _IDLE_FLUSH_MINUTES * 60:
+                user_id = state["user_id"]
+                logger.info(
+                    "Conversation %s idle for %.0fs — flushing memory/profile for %s",
+                    conv_id, idle_seconds, user_id,
+                )
+                state["flushed"] = True
+                asyncio.create_task(_write_memories_background(
+                    user_id=user_id,
+                    user_message=state["last_user_message"],
+                    assistant_message=state["last_assistant_message"],
+                ))
+                asyncio.create_task(_update_profile_background(
+                    user_id=user_id,
+                    user_message=state["last_user_message"],
+                    assistant_message=state["last_assistant_message"],
+                ))
+
+
+# =====================================================================
 # Registration
 # =====================================================================
 
-def register_orchestration_worker() -> None:
-    """Subscribe the orchestration handler to the event bus."""
+async def register_orchestration_worker() -> None:
+    """Subscribe the orchestration handler to the event bus and start background loops."""
     event_bus.subscribe(CONVERSATION_MESSAGE_RECEIVED, handle_inbound_message)
+    asyncio.create_task(_idle_flush_loop())
     logger.info("Orchestration worker registered on topic '%s'", CONVERSATION_MESSAGE_RECEIVED)
