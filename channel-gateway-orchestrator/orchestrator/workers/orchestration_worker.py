@@ -476,15 +476,17 @@ async def handle_inbound_message(event: dict[str, Any]) -> None:
     )
     await event_bus.publish(RELATIONSHIP_INTERACTION_RECORDED, rel_event.model_dump())
 
-    #7. Write memories to MyMem0 (fire-and-forget)
-    asyncio.create_task(_write_memories_background(
-        user_id=user_id,
-        user_message=message_content,
-        assistant_message=full_reply_text,
-    ))
-
-    # 8. Check summarization threshold
+    # 7. Write memories to MyMem0 every 3 turns (fire-and-forget)
+    # Short-term context handles recent rounds — no need to hit the memory LLM every message.
     conv_length = conversation_store_client.get_conversation_length(conversation_id)
+    if conv_length % 3 == 0:
+        asyncio.create_task(_write_memories_background(
+            user_id=user_id,
+            user_message=message_content,
+            assistant_message=full_reply_text,
+        ))
+
+    # 8. Check summarization threshold (reuses conv_length from step 7)
     if conv_length > 0 and conv_length % settings.summarization_threshold == 0:
         summary_event = MemorySummaryRequestedEvent(
             event_id=_new_event_id(),

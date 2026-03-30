@@ -46,7 +46,10 @@ class EventBus:
         self._background_tasks: set[asyncio.Task] = set()
 
     def subscribe(self, topic: str, callback: Subscriber) -> None:
-        """Register an async callback for a topic."""
+        """Register an async callback for a topic. Silently skips duplicate registrations."""
+        if callback in self._subscribers[topic]:
+            logger.warning("Duplicate subscription ignored — %s already on topic '%s'", callback.__qualname__, topic)
+            return
         self._subscribers[topic].append(callback)
         logger.info("Subscribed %s to topic '%s'", callback.__qualname__, topic)
 
