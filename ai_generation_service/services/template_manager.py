@@ -14,6 +14,7 @@ survive container restarts.  Preset JSON files in prompt_templates/ serve as
 seed data that is upserted into the DB on every startup.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -59,20 +60,44 @@ class TemplateManager:
 
     async def load_templates(self) -> int:
         """
-        Load preset templates from disk, sync them to DB, then load all
-        templates from DB into memory cache.
+        Load templates into memory, ensuring the service starts quickly.
+
+        Strategy:
+        1. Load preset templates from local JSON files (instant, no network).
+        2. Try to load all templates from DB (picks up dynamically registered
+           ones that survived a restart).  If db-manager is unreachable the
+           presets loaded in step 1 are still available — the service is NOT
+           blocked.
+        3. Sync presets to DB in a background task so it never delays startup.
 
         Returns:
             Number of templates loaded into memory.
         """
-        # Step 1: Load preset templates from JSON files and sync to DB
-        await self._sync_presets_to_db()
+        # Step 1: Load presets from local JSON — always available, zero latency
+        self._load_presets_from_disk()
 
-        # Step 2: Load all templates from DB (presets + dynamically registered)
-        await self._load_from_db()
+        # Step 2: Try loading from DB (adds any dynamically registered templates)
+        db_ok = await self._load_from_db()
+
+        # Step 3: Sync presets to DB in the background (non-blocking)
+        if db_ok:
+            asyncio.create_task(self._sync_presets_to_db())
+        else:
+            # db-manager not ready yet — retry sync in background with delay
+            asyncio.create_task(self._deferred_sync())
 
         logger.info("Loaded %d templates into memory", len(self._templates))
         return len(self._templates)
+
+    async def _deferred_sync(self) -> None:
+        """Retry DB sync after a delay when db-manager wasn't ready at startup."""
+        await asyncio.sleep(10)
+        logger.info("Retrying deferred DB sync for preset templates...")
+        db_ok = await self._load_from_db()
+        if db_ok:
+            await self._sync_presets_to_db()
+        else:
+            logger.warning("db-manager still unreachable; preset sync skipped")
 
     # ------------------------------------------------------------------ #
     # Query Operations
@@ -216,10 +241,31 @@ class TemplateManager:
             logger.error("Failed to persist template %s to DB: %s", template.template_id, str(e))
             raise
 
-    async def _load_from_db(self) -> None:
-        """Load all templates from DB into the in-memory cache."""
+    def _load_presets_from_disk(self) -> None:
+        """Load preset templates from local JSON files into memory."""
+        if not self._templates_dir.exists():
+            logger.warning("Templates directory does not exist: %s", self._templates_dir)
+            return
+
+        for filepath in sorted(self._templates_dir.glob("*.json")):
+            if filepath.name == "template_index.json":
+                continue
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                template = PromptTemplate(**data)
+                self._templates[template.template_id] = template
+                logger.info("Loaded preset template: %s (%s)", template.template_id, template.name)
+            except Exception as e:
+                logger.error("Failed to load preset template %s: %s", filepath.name, str(e))
+
+    async def _load_from_db(self) -> bool:
+        """Load all templates from DB into the in-memory cache.
+
+        Returns True if DB was reachable, False otherwise.
+        """
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
+            async with httpx.AsyncClient(timeout=5) as client:
                 r = await client.get(
                     f"{self._db_manager_url}/templates/all",
                     headers=self._headers,
@@ -232,8 +278,10 @@ class TemplateManager:
                     self._templates[template.template_id] = template
                 except Exception as e:
                     logger.error("Failed to parse template from DB: %s", str(e))
+            return True
         except Exception as e:
-            logger.error("Failed to load templates from DB: %s", str(e))
+            logger.warning("Failed to load templates from DB (service may not be ready): %s", str(e))
+            return False
 
     async def _sync_presets_to_db(self) -> None:
         """Load preset JSON files from disk and upsert them into the DB."""
