@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.db.postgres import get_pg_session
+from app.db.postgres import get_postgres_session_maker
 from app.repositories.template_repository import TemplateRepository
 
 router = APIRouter(prefix="/templates", tags=["templates"])
@@ -67,7 +67,7 @@ async def list_templates(
     owner: Optional[str] = Query(None),
     tag: Optional[str] = Query(None),
 ):
-    async with get_pg_session() as session:
+    async with get_postgres_session_maker()() as session:
         rows = await template_repo.list_by_filters(
             session, category=category, owner=owner, tag=tag
         )
@@ -77,7 +77,7 @@ async def list_templates(
 
 @router.get("/all", response_model=Dict[str, Any])
 async def get_all_templates():
-    async with get_pg_session() as session:
+    async with get_postgres_session_maker()() as session:
         rows = await template_repo.get_all(session)
     templates = [_row_to_response(r) for r in rows]
     return {"templates": [t.model_dump() for t in templates], "total": len(templates)}
@@ -85,7 +85,7 @@ async def get_all_templates():
 
 @router.get("/{template_id}", response_model=TemplateResponse)
 async def get_template(template_id: str):
-    async with get_pg_session() as session:
+    async with get_postgres_session_maker()() as session:
         row = await template_repo.get_by_id(session, template_id)
     if not row:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -95,7 +95,7 @@ async def get_template(template_id: str):
 @router.put("", response_model=TemplateResponse)
 async def upsert_template(request: TemplateUpsertRequest):
     template_data = request.model_dump()
-    async with get_pg_session() as session:
+    async with get_postgres_session_maker()() as session:
         await template_repo.upsert(session, template_data)
         await session.commit()
         row = await template_repo.get_by_id(session, request.template_id)
@@ -106,7 +106,7 @@ async def upsert_template(request: TemplateUpsertRequest):
 
 @router.delete("/{template_id}")
 async def delete_template(template_id: str):
-    async with get_pg_session() as session:
+    async with get_postgres_session_maker()() as session:
         deleted = await template_repo.delete(session, template_id)
         await session.commit()
     if not deleted:
@@ -119,7 +119,7 @@ async def find_by_name_and_owner(
     name: str = Query(...),
     owner: str = Query(...),
 ):
-    async with get_pg_session() as session:
+    async with get_postgres_session_maker()() as session:
         row = await template_repo.find_by_name_and_owner(session, name, owner)
     if not row:
         raise HTTPException(status_code=404, detail="Template not found")
