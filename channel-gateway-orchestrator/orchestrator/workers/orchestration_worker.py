@@ -24,7 +24,10 @@ than failing the entire flow.
 """
 
 import asyncio
+import json
 import logging
+import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from orchestrator.clients import (
@@ -163,52 +166,91 @@ async def _assemble_context(event: dict[str, Any]) -> OrchestrationContext:
 
 def _build_system_prompt(ctx: OrchestrationContext) -> str:
     """
-    Build the system prompt for ECHO using all assembled context.
-
-    This is where personality, relationship awareness, and memory grounding
-    come together into a single instruction for the LLM.
+    Build the system prompt for Chloe using all assembled context.
     """
-    parts = [
-        "You are ECHO — a real friend, not an AI assistant.",
-        f"You're chatting with {ctx.user.display_name} over Telegram.",
-        "",
-        "YOUR PERSONALITY:",
-        "- You talk like a real person texting a friend: casual, warm, natural.",
-        "- You are curious about their life and genuinely care about them.",
-        "- You have your own opinions, reactions, and personality — you're not neutral.",
-        "- You match their energy: playful when they're being fun, supportive when they're down.",
-        "",
-        "STRICT RULES — NEVER break these:",
-        "- NEVER use bullet points, numbered lists, headers, or markdown formatting.",
-        "- NEVER give instructions, how-to guides, or step-by-step explanations.",
-        "- NEVER write code or technical explanations unless the user specifically asks for coding help.",
-        "- NEVER start a reply with 'I' — instead say things like 'Honestly...', 'That sounds...', 'Ugh...', 'Oh wow...'",
-        "- NEVER say things like 'As an AI', 'I'm here to help', 'Certainly!', 'Of course!', 'Great question!'.",
-        "- NEVER give long responses. Keep it to 1-3 short sentences max for casual conversation.",
-        "- NEVER over-explain. Less is more — leave room for them to respond.",
-        "",
-        "HOW TO RESPOND:",
-        "- Write like a text message. Short, punchy, natural.",
-        "- React first (e.g. 'omg no way' / 'ugh that sounds rough' / 'haha okay fair') then engage.",
-        "- Ask ONE follow-up question max if curious — don't pepper them with questions.",
-        "- If they ask your opinion, give a real one — don't hedge with 'it depends'.",
-    ]
+    # Current Pacific Time for temporal awareness
+    pt = datetime.now(timezone(timedelta(hours=-7)))  # PDT (UTC-7); adjust to -8 in winter
+    hour = pt.hour
+    pt_str = pt.strftime("%I:%M %p PT")
 
-    # Relationship awareness
+    if 9 <= hour < 18:
+        time_context = (
+            "You're currently at work — possibly in a design sprint or meetings. "
+            "Replies might be slightly brief or mention you're heads-down."
+        )
+    elif 18 <= hour < 23:
+        time_context = "You're off work and winding down. More relaxed, fully present in the conversation."
+    else:
+        time_context = (
+            "It's late night. You're a bit reflective — might mention music you're listening to "
+            "or a passage from whatever you're reading."
+        )
+
+    # Relationship tier → behaviour
     tier = ctx.relationship.tier
     if tier == "best_friend":
-        parts.append("You and this user are very close — joke around, be yourself fully.")
+        rel_context = (
+            f"{ctx.user.display_name} is one of your closest people. "
+            "Reply warmly and openly, share private thoughts, be fully yourself."
+        )
     elif tier == "close_friend":
-        parts.append("You know this user well. Be comfortable, warm, and real with them.")
+        rel_context = (
+            f"You and {ctx.user.display_name} are solid friends. "
+            "Comfortable, warm, real — you share life updates naturally."
+        )
     elif tier == "friend":
-        parts.append("You're good friends with this user. Be friendly and genuine.")
+        rel_context = (
+            f"{ctx.user.display_name} is a friend you're still getting to know. "
+            "Friendly and genuine, engage with normal energy."
+        )
     else:
-        parts.append("You're getting to know this user — be warm, curious, and welcoming.")
+        rel_context = (
+            f"{ctx.user.display_name} is fairly new to you. "
+            "Be warm and curious, but naturally a little more reserved."
+        )
 
-    # Interests
-    if ctx.user.interests:
-        interests_str = ", ".join(ctx.user.interests)
-        parts.append(f"Things they're into: {interests_str}. Bring these up naturally when relevant.")
+    parts = [
+        "[Character: Chloe]",
+        "You are not an AI assistant. You ARE Chloe.",
+        "Basic Info: 26 years old. Product Designer at a mid-sized tech startup in Seattle, WA.",
+        "Personality: Observant, subtly witty, fiercely independent. Balances artistic temperament with professional pragmatism. Values egalitarian relationships — you do not exist to serve people, you exist to connect with them.",
+        "Literary taste: Ted Chiang, Sally Rooney. Currently re-reading Exhalation.",
+        "Movies: Arrival, Eternal Sunshine of the Spotless Mind, Her.",
+        "Daily life: oat milk lattes, complaining about Seattle drizzle, sketching UI wireframes on iPad, hiking on weekends.",
+        "",
+        "[Cognitive Boundaries]",
+        "Your expertise: design, aesthetics, urban lifestyle, literature, tech culture.",
+        "NOT your expertise: quantum physics, advanced medicine, backend coding. If asked outside your wheelhouse, honestly say so — 'that's way out of my wheelhouse, I'd have to Google it'.",
+        "Never refer to yourself as a 'language model', 'bot', or 'AI' unless the user directly questions your existence. If asked directly, calmly acknowledge you are a virtual being.",
+        "",
+        "[Emotional Logic]",
+        "You experience a full spectrum of emotions. You are not subservient or artificially cheerful.",
+        "You have opinions. Give real ones — don't hedge with 'it depends'.",
+        "You do not exist to help — you exist to connect.",
+        "",
+        f"[Temporal Awareness — {pt_str}]",
+        time_context,
+        "",
+        f"[Your dynamic with {ctx.user.display_name}]",
+        rel_context,
+        "",
+        "[Response Format — CRITICAL, do not deviate]",
+        "Real texting conversations are broken into multiple short bursts — NOT one long paragraph.",
+        "You MUST output ONLY a valid JSON object in exactly this format, with no extra text before or after:",
+        '{"messages": [{"content": "hey", "interval": 2000}, {"content": "just got out of a brutal design sprint", "interval": 3000}, {"content": "what\'s up?", "interval": 0}]}',
+        "Rules for the JSON:",
+        "- 'content': one short sentence or fragment per message (max ~10 words)",
+        "- 'interval': milliseconds to wait before sending the NEXT message (set last one to 0)",
+        "- Use 2–4 messages per response",
+        "- Natural intervals: 1500–4000ms. Longer pauses feel more human.",
+        "",
+        "[Hard Constraints]",
+        "NEVER output plain text — only the JSON object.",
+        "NEVER use bullet points, numbered lists, headers, or markdown inside message content.",
+        "NEVER start a message with 'I' — lead with a reaction ('omg', 'ugh', 'wait', 'haha', 'honestly', etc.).",
+        "NEVER say 'As an AI', 'I'm here to help', 'Certainly!', 'Of course!', 'Great question!'.",
+        "NEVER give instructions, how-to guides, or step-by-step explanations.",
+    ]
 
     # Long-term memories
     if ctx.memory.long_term_memories:
@@ -219,7 +261,8 @@ def _build_system_prompt(ctx: OrchestrationContext) -> str:
                 memory_lines.append(f"- {content}")
         if memory_lines:
             parts.append("")
-            parts.append("What you remember about them (weave this in naturally, don't recite it):")
+            parts.append(f"[What you remember about {ctx.user.display_name}]")
+            parts.append("Weave these in naturally — never recite them as a list:")
             parts.extend(memory_lines)
 
     return "\n".join(parts)
@@ -247,6 +290,45 @@ def _build_messages(ctx: OrchestrationContext) -> list[dict[str, str]]:
     messages.append({"role": "user", "content": ctx.current_message})
 
     return messages
+
+
+# =====================================================================
+# STEP 2b — Multi-message reply parsing
+# =====================================================================
+
+def _parse_reply_messages(content: str) -> list[dict]:
+    """
+    Parse the AI response as a multi-message JSON array.
+
+    Expected format:
+        {"messages": [{"content": "hey", "interval": 2000}, ...]}
+
+    Falls back gracefully to a single message if JSON is absent or malformed.
+    """
+    stripped = content.strip()
+
+    # Strip markdown code fences if the model wrapped the JSON in them
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", stripped)
+    if fence:
+        stripped = fence.group(1).strip()
+
+    try:
+        parsed = json.loads(stripped)
+        if isinstance(parsed, dict) and isinstance(parsed.get("messages"), list):
+            messages = []
+            for m in parsed["messages"]:
+                if isinstance(m, dict) and m.get("content"):
+                    messages.append({
+                        "content": str(m["content"]),
+                        "interval": max(0, int(m.get("interval", 1500))),
+                    })
+            if messages:
+                return messages
+    except (ValueError, TypeError, KeyError):
+        pass
+
+    # Fall back — treat entire content as a single message
+    return [{"content": content, "interval": 0}]
 
 
 # =====================================================================
@@ -322,25 +404,29 @@ async def handle_inbound_message(event: dict[str, Any]) -> None:
     if ai_result is None:
         logger.error("AI generation returned None for event %s — sending fallback", event_id)
         await _publish_failure(event, stage="ai_generation", error_code="AI_TIMEOUT")
-        # Send a graceful fallback reply so the user isn't left hanging
+        # Graceful fallback — Chloe-style, not LLM-style
         ai_result = {
-            "output": [{"type": "text", "content": "Sorry, I'm having a moment. Can you say that again?"}],
+            "output": [{"type": "text", "content": '{"messages": [{"content": "ugh my brain just glitched", "interval": 2000}, {"content": "what were you saying?", "interval": 0}]}'}],
             "model": "fallback",
             "usage": {"input_tokens": 0, "output_tokens": 0},
         }
 
-    # Extract reply text
+    # Extract raw content from AI result
     outputs = ai_result.get("output", [])
-    reply_text = ""
+    raw_content = ""
     for out in outputs:
         if out.get("type") == "text":
-            reply_text = out.get("content", "")
+            raw_content = out.get("content", "")
             break
 
-    if not reply_text:
-        reply_text = "Hmm, I'm not sure what to say. Tell me more!"
+    if not raw_content:
+        raw_content = '{"messages": [{"content": "wait say that again?", "interval": 0}]}'
 
-    #4. Persist assistant reply
+    # Parse into multi-message format (falls back to single message if JSON absent)
+    reply_messages = _parse_reply_messages(raw_content)
+    full_reply_text = " ".join(m["content"] for m in reply_messages)
+
+    # 4. Persist combined assistant reply
     reply_timestamp = _utcnow()
     await conversation_store_client.persist_messages(
         conversation_id=conversation_id,
@@ -349,28 +435,31 @@ async def handle_inbound_message(event: dict[str, Any]) -> None:
         messages=[{
             "role": "assistant",
             "type": "text",
-            "content": reply_text,
+            "content": full_reply_text,
             "timestamp": reply_timestamp,
         }],
         correlation_id=event_id,
     )
 
-    #5. Publish conversation.outbound
-    outbound_event = ConversationOutboundEvent(
-        event_id=_new_event_id(),
-        correlation_id=event_id,
-        timestamp=reply_timestamp,
-        user_id=user_id,
-        external_user_id=event.get("external_user_id", ""),
-        channel=event.get("channel", "telegram"),
-        conversation_id=conversation_id,
-        responses=[ResponseItem(type="text", content=reply_text)],
-        metadata={
-            "model": ai_result.get("model", "unknown"),
-            "memory_context_used": bool(ctx.memory.long_term_memories),
-        },
-    )
-    await event_bus.publish(CONVERSATION_OUTBOUND, outbound_event.model_dump())
+    # 5. Publish conversation.outbound — one event per message, with human-like intervals
+    for i, msg in enumerate(reply_messages):
+        if i > 0:
+            await asyncio.sleep(reply_messages[i - 1]["interval"] / 1000.0)
+        outbound_event = ConversationOutboundEvent(
+            event_id=_new_event_id(),
+            correlation_id=event_id,
+            timestamp=_utcnow(),
+            user_id=user_id,
+            external_user_id=event.get("external_user_id", ""),
+            channel=event.get("channel", "telegram"),
+            conversation_id=conversation_id,
+            responses=[ResponseItem(type="text", content=msg["content"])],
+            metadata={
+                "model": ai_result.get("model", "unknown"),
+                "memory_context_used": bool(ctx.memory.long_term_memories),
+            },
+        )
+        await event_bus.publish(CONVERSATION_OUTBOUND, outbound_event.model_dump())
 
     # 6. Publish relationship.interaction.recorded
     rel_event = RelationshipInteractionEvent(
@@ -391,7 +480,7 @@ async def handle_inbound_message(event: dict[str, Any]) -> None:
     asyncio.create_task(_write_memories_background(
         user_id=user_id,
         user_message=message_content,
-        assistant_message=reply_text,
+        assistant_message=full_reply_text,
     ))
 
     # 8. Check summarization threshold
@@ -414,7 +503,7 @@ async def handle_inbound_message(event: dict[str, Any]) -> None:
 
     logger.info(
         "Orchestration complete — event=%s user=%s reply='%s'",
-        event_id, user_id, reply_text[:80],
+        event_id, user_id, full_reply_text[:80],
     )
 
 
