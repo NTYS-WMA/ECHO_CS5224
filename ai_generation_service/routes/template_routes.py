@@ -62,7 +62,7 @@ async def register_template(
 ) -> TemplateRegisterResponse:
     """Register a new prompt template."""
     try:
-        template = manager.register_template(request)
+        template = await manager.register_template(request)
         return TemplateRegisterResponse(
             template_id=template.template_id,
             name=template.name,
@@ -154,7 +154,7 @@ async def update_template(
 ) -> PromptTemplate:
     """Update an existing template."""
     try:
-        return manager.update_template(template_id, request)
+        return await manager.update_template(template_id, request)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
