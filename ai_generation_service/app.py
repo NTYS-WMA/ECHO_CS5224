@@ -64,9 +64,13 @@ async def lifespan(app: FastAPI):
         os.path.dirname(os.path.abspath(__file__)),
         "prompt_templates",
     )
-    _template_manager = TemplateManager(templates_dir=templates_dir)
-    loaded = _template_manager.load_templates()
-    logger.info("Loaded %d prompt templates from %s", loaded, templates_dir)
+    _template_manager = TemplateManager(
+        templates_dir=templates_dir,
+        db_manager_url=settings.DB_MANAGER_URL,
+        db_manager_api_key=settings.DB_MANAGER_API_KEY,
+    )
+    loaded = await _template_manager.load_templates()
+    logger.info("Loaded %d prompt templates", loaded)
 
     template_renderer = TemplateRenderer(template_manager=_template_manager)
 

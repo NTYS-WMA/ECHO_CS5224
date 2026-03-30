@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # but can be overridden for custom deployments.
     TEMPLATES_DIR_OVERRIDE: Optional[str] = None
 
+    # DB Manager service URL for persistent template storage
+    DB_MANAGER_URL: str = "http://db-manager:18087"
+    DB_MANAGER_API_KEY: Optional[str] = None
+
     # Event broker configuration
     # TO BE UPDATED: Actual broker implementation details (e.g., Redis Streams, RabbitMQ, or local queue)
     EVENT_BROKER_URL: str = "redis://localhost:6379/0"
