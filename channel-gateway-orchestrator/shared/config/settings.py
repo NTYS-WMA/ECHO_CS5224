@@ -28,13 +28,13 @@ class Settings(BaseSettings):
     mock_services: bool = Field(default=True, description="Use mock clients when True")
 
     #Orchestrator Tuning
-    short_term_message_limit: int = Field(default=12)
+    short_term_message_limit: int = Field(default=50)
     long_term_memory_limit: int = Field(default=5)
     summarization_threshold: int = Field(default=50)
 
     #AI Generation
     ai_temperature: float = Field(default=0.7)
-    ai_max_tokens: int = Field(default=200)
+    ai_max_tokens: int = Field(default=500)
 
     model_config = {
         "env_file": ".env",

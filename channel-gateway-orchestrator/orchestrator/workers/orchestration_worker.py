@@ -476,11 +476,17 @@ async def handle_inbound_message(event: dict[str, Any]) -> None:
     )
     await event_bus.publish(RELATIONSHIP_INTERACTION_RECORDED, rel_event.model_dump())
 
-    # 7. Write memories to MyMem0 every 3 turns (fire-and-forget)
-    # Short-term context handles recent rounds — no need to hit the memory LLM every message.
+    # 7. Write memories + update profile periodically (fire-and-forget)
+    # Short-term context (50 rounds) handles recent turns — no need to call LLM every message.
     conv_length = conversation_store_client.get_conversation_length(conversation_id)
-    if conv_length % 3 == 0:
+    if conv_length > 0 and conv_length % 10 == 0:
         asyncio.create_task(_write_memories_background(
+            user_id=user_id,
+            user_message=message_content,
+            assistant_message=full_reply_text,
+        ))
+    if conv_length > 0 and conv_length % 20 == 0:
+        asyncio.create_task(_update_profile_background(
             user_id=user_id,
             user_message=message_content,
             assistant_message=full_reply_text,
@@ -536,6 +542,30 @@ async def _write_memories_background(
         )
     except Exception:
         logger.exception("Background memory write failed for %s", user_id)
+
+
+async def _update_profile_background(
+    user_id: str,
+    user_message: str,
+    assistant_message: str,
+) -> None:
+    """
+    Update the user profile via POST /profile every 20 conversation turns.
+
+    Runs as a fire-and-forget background task — does not block reply delivery.
+    """
+    try:
+        await asyncio.sleep(8)  # stagger after memory write
+        await memory_client.update_mymem0_profile(
+            user_id=user_id,
+            messages=[
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "content": assistant_message},
+            ],
+        )
+        logger.info("Background profile update complete for %s", user_id)
+    except Exception:
+        logger.exception("Background profile update failed for %s", user_id)
 
 
 async def _publish_failure(event: dict, stage: str, error_code: str) -> None:
