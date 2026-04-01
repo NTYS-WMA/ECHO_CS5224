@@ -1,9 +1,9 @@
 """
-Cron Service v3.0
+Cron Service v4.0
 
-Lightweight global time-trigger service for the ECHO platform.
-Maintains a schedule table and publishes events to the event broker
-when scheduled times arrive.
+Event registration and trigger service for the ECHO platform.
+External services register scheduled events via API; the cron engine
+polls the database for due events and dispatches them.
 """
 
-__version__ = "3.0.0"
+__version__ = "4.0.0"
