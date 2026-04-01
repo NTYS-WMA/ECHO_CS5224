@@ -1,5 +1,5 @@
 """
-Configuration settings for the Cron Service v3.0.
+Configuration settings for the Cron Service v4.0.
 
 All settings can be overridden via environment variables with the
 CRON_ prefix.
@@ -14,33 +14,19 @@ from pydantic_settings import BaseSettings
 
 
 class ScheduleEntryConfig(BaseSettings):
-    """A single schedule entry loaded from configuration."""
+    """A single built-in schedule entry loaded from configuration."""
 
     name: str = Field(..., description="Unique schedule name.")
     cron_expression: Optional[str] = Field(
-        None,
-        description="5-field cron expression (e.g. '0 3 * * *').",
+        None, description="5-field cron expression."
     )
-    interval_seconds: Optional[int] = Field(
-        None,
-        ge=60,
-        description="Fixed interval in seconds (min 60).",
-    )
-    topic: str = Field(
-        ...,
-        description="Event topic to publish when schedule fires.",
-    )
-    payload: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Static payload to include in the published event.",
-    )
-    enabled: bool = Field(
-        default=True,
-        description="Whether this schedule is active.",
-    )
+    interval_seconds: Optional[int] = Field(None, ge=60)
+    topic: str = Field(..., description="Event topic to publish.")
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = Field(default=True)
 
 
-# Default schedules reflecting the ECHO platform's periodic needs.
+# Default built-in schedules (registered into DB on first startup)
 DEFAULT_SCHEDULES: List[Dict[str, Any]] = [
     {
         "name": "relationship-decay",
@@ -63,25 +49,24 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Service identity
-    SERVICE_NAME: str = Field(
-        default="cron-service",
-        description="Service name for logging and registration.",
+    SERVICE_NAME: str = Field(default="cron-service")
+    SERVICE_VERSION: str = Field(default="4.0.0")
+    HOST: str = Field(default="0.0.0.0")
+    PORT: int = Field(default=8005)
+    LOG_LEVEL: str = Field(default="INFO")
+
+    # DB Manager — the cron service talks to db-manager for persistence
+    DB_MANAGER_URL: str = Field(
+        default="http://localhost:18087",
+        description="Base URL of the DB Manager service.",
     )
-    SERVICE_VERSION: str = Field(
-        default="3.0.0",
-        description="Service version.",
+    DB_MANAGER_TIMEOUT: int = Field(
+        default=10,
+        description="HTTP timeout for DB Manager calls (seconds).",
     )
-    HOST: str = Field(
-        default="0.0.0.0",
-        description="Bind host.",
-    )
-    PORT: int = Field(
-        default=8005,
-        description="HTTP port for the service.",
-    )
-    LOG_LEVEL: str = Field(
-        default="INFO",
-        description="Logging level.",
+    DB_MANAGER_API_KEY: str = Field(
+        default="",
+        description="API key for DB Manager (if AUTH_ENABLED).",
     )
 
     # Event Publishing (Internal Messaging Layer)
@@ -94,26 +79,26 @@ class Settings(BaseSettings):
         description="HTTP timeout for event publish calls (seconds).",
     )
     EVENT_PUBLISH_RETRIES: int = Field(
-        default=2,
-        ge=0,
-        le=5,
-        description="Number of retries for failed event publish attempts.",
+        default=2, ge=0, le=5,
+        description="Retries for failed event publish attempts.",
     )
 
-    # Scheduler tick interval — how often the scheduler checks for due jobs
+    # Scheduler tick interval
     TICK_INTERVAL_SECONDS: int = Field(
-        default=30,
-        ge=5,
+        default=30, ge=5,
         description="Seconds between scheduler tick cycles.",
     )
 
-    # Schedules — JSON string or loaded from default
+    # Built-in schedules — JSON string or loaded from default
     SCHEDULES_JSON: str = Field(
         default="",
-        description=(
-            "JSON array of schedule entries.  "
-            "If empty, built-in defaults are used."
-        ),
+        description="JSON array of built-in schedule entries.",
+    )
+
+    # Whether to auto-register built-in schedules into DB on startup
+    AUTO_REGISTER_DEFAULTS: bool = Field(
+        default=True,
+        description="Auto-register default schedules into DB on startup.",
     )
 
     class Config:
@@ -122,7 +107,7 @@ class Settings(BaseSettings):
         case_sensitive = True
 
     def get_schedules(self) -> List[ScheduleEntryConfig]:
-        """Parse and return schedule entries from config."""
+        """Parse and return built-in schedule entries from config."""
         raw: List[Dict[str, Any]]
         if self.SCHEDULES_JSON.strip():
             raw = json.loads(self.SCHEDULES_JSON)
