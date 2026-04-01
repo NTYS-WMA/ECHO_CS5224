@@ -1,5 +1,5 @@
 """
-Response models for the Cron Service v3.0.
+Response models for the Cron Service v4.0.
 """
 
 from datetime import datetime
@@ -8,24 +8,37 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
-class ScheduleEntryResponse(BaseModel):
-    """Response for a single schedule entry."""
+class ScheduledEventResponse(BaseModel):
+    """Response for a single scheduled event."""
 
-    name: str = Field(..., description="Schedule name.")
-    cron_expression: Optional[str] = Field(None, description="Cron expression.")
-    interval_seconds: Optional[int] = Field(None, description="Interval in seconds.")
-    topic: str = Field(..., description="Event topic.")
-    payload: Dict[str, Any] = Field(default_factory=dict, description="Static payload.")
-    enabled: bool = Field(..., description="Whether the schedule is active.")
-    next_fire_at: Optional[datetime] = Field(None, description="Next fire time (UTC).")
-    last_fired_at: Optional[datetime] = Field(None, description="Last fire time (UTC).")
+    id: str = Field(..., description="Event UUID.")
+    event_name: str = Field(..., description="Event name.")
+    event_type: str = Field(..., description="one_time or recurring.")
+    caller_service: str = Field(..., description="Registering service.")
+    callback_url: Optional[str] = None
+    topic: Optional[str] = None
+    cron_expression: Optional[str] = None
+    interval_seconds: Optional[int] = None
+    scheduled_at: Optional[datetime] = None
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    status: str = Field(..., description="active|paused|completed|cancelled|failed")
+    next_fire_at: Optional[datetime] = None
+    last_fired_at: Optional[datetime] = None
+    fire_count: int = 0
+    max_fires: Optional[int] = None
+    correlation_id: Optional[str] = None
+    group_key: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
-class ScheduleListResponse(BaseModel):
-    """Response for GET /api/v1/schedules."""
+class EventListResponse(BaseModel):
+    """Response for GET /api/v1/events."""
 
-    schedules: List[ScheduleEntryResponse] = Field(default_factory=list)
-    total: int = Field(..., description="Total number of schedules.")
+    events: List[ScheduledEventResponse] = Field(default_factory=list)
+    total: int = Field(..., description="Total matching events.")
+    limit: int = 100
+    offset: int = 0
 
 
 class SchedulerStatusResponse(BaseModel):
@@ -33,15 +46,29 @@ class SchedulerStatusResponse(BaseModel):
 
     running: bool = Field(..., description="Whether the scheduler is running.")
     tick_interval_seconds: int = Field(..., description="Tick interval in seconds.")
-    total_schedules: int = Field(default=0, description="Total configured schedules.")
-    active_schedules: int = Field(default=0, description="Number of enabled schedules.")
+    total_events_polled: int = Field(default=0, description="Total events polled since start.")
+    total_events_fired: int = Field(default=0, description="Total events fired since start.")
     last_tick_at: Optional[datetime] = Field(None, description="Last tick time.")
+    db_manager_url: str = Field(..., description="DB Manager URL.")
 
 
 class ManualTriggerResponse(BaseModel):
-    """Response for POST /api/v1/scheduler/trigger."""
+    """Response for POST /api/v1/events/{event_id}/trigger."""
 
-    schedule_name: str = Field(..., description="Schedule that was triggered.")
-    topic: str = Field(..., description="Topic the event was published to.")
-    published: bool = Field(..., description="Whether the event was published.")
+    event_id: str = Field(..., description="Event that was triggered.")
+    event_name: str = Field(..., description="Event name.")
+    topic: Optional[str] = None
+    callback_url: Optional[str] = None
+    published: bool = Field(..., description="Whether the event was dispatched.")
     error: Optional[str] = Field(None, description="Error message if failed.")
+
+
+class RegisterEventResponse(BaseModel):
+    """Response for POST /api/v1/events — event registration confirmation."""
+
+    id: str = Field(..., description="UUID of the newly created event.")
+    event_name: str
+    event_type: str
+    status: str
+    next_fire_at: Optional[datetime] = None
+    message: str = "Event registered successfully."
