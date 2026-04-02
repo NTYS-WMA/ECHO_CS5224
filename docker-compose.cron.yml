@@ -68,7 +68,7 @@ services:
 # Connect to existing network so we can reach mem0-mongodb
 networks:
   default:
-    name: memory_service_default
+    name: memory_service_mem0_network
     external: true
 
 volumes:
