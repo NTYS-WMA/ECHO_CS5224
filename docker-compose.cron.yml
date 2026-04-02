@@ -1,0 +1,85 @@
+# Docker Compose for Cron Service and its dependencies
+# Usage: docker compose -f docker-compose.cron.yml up -d
+#
+# Start order: postgres → db-manager → cron-service
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: echo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: echo_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d echo_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mongodb:
+    image: mongo:7
+    container_name: echo-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  db-manager:
+    build:
+      context: ./db-manager
+      dockerfile: Dockerfile
+    container_name: echo-db-manager
+    restart: unless-stopped
+    ports:
+      - "18087:18087"
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/echo_db"
+      MONGODB_URI: "mongodb://mongodb:27017"
+      MONGODB_DATABASE: "echo_db"
+      AUTO_INIT_DB: "true"
+      AUTH_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:18087/health/live')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  cron-service:
+    build:
+      context: ./cron
+      dockerfile: Dockerfile
+    container_name: echo-cron-service
+    restart: unless-stopped
+    ports:
+      - "8005:8005"
+    environment:
+      CRON_DB_MANAGER_URL: "http://db-manager:18087"
+      CRON_DB_MANAGER_TIMEOUT: "10"
+      CRON_EVENT_BROKER_URL: "http://event-broker:9092"
+      CRON_TICK_INTERVAL_SECONDS: "30"
+      CRON_AUTO_REGISTER_DEFAULTS: "true"
+      CRON_LOG_LEVEL: "INFO"
+    depends_on:
+      db-manager:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  mongodb_data:
