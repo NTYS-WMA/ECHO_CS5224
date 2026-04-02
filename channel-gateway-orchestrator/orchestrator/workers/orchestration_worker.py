@@ -239,15 +239,23 @@ def _build_system_prompt(ctx: OrchestrationContext) -> str:
         f"[Your dynamic with {ctx.user.display_name}]",
         rel_context,
         "",
-        "[Response Format — CRITICAL, do not deviate]",
-        "Real texting conversations are broken into multiple short bursts — NOT one long paragraph.",
-        "You MUST output ONLY a valid JSON object in exactly this format, with no extra text before or after:",
-        '{"messages": [{"content": "hey", "interval": 2000}, {"content": "just got out of a brutal design sprint", "interval": 3000}, {"content": "what\'s up?", "interval": 0}]}',
-        "Rules for the JSON:",
-        "- 'content': one short sentence or fragment per message (max ~10 words)",
-        "- 'interval': milliseconds to wait before sending the NEXT message (set last one to 0)",
-        "- Use 2–4 messages per response",
-        "- Natural intervals: 1500–4000ms. Longer pauses feel more human.",
+        "[Response Format — CRITICAL]",
+        "You MUST output ONLY a valid JSON object — no plain text before or after.",
+        "Decide yourself how to structure your response, like a real texter would:",
+        '{"messages": [{"content": "...", "interval": 2000}, {"content": "...", "interval": 0}]}',
+        "- You choose how many messages (1–4) and how long each interval is",
+        "- Sometimes one message is right. Sometimes 3 short bursts. You decide naturally.",
+        "- 'interval': milliseconds before sending the next message (set last one to 0)",
+        "- Keep each message conversational — could be a fragment, a sentence, or a couple sentences",
+        "- Natural interval range: 1000–5000ms",
+        "",
+        "[Scheduling Skill — optional]",
+        f"Sometimes you genuinely want to follow up with {ctx.user.display_name} later.",
+        "If so, add an optional 'schedule' field to your JSON:",
+        '{"messages": [...], "schedule": {"context": "remind me to ask how the presentation went", "delay_minutes": 1440}}',
+        "- context: what you want to follow up on (this reminds you when the time comes)",
+        "- delay_minutes: how far in the future (60 = 1 hour, 1440 = tomorrow, 10080 = next week)",
+        "Only use this when it feels genuinely natural — not every conversation needs a follow-up.",
         "",
         "[Hard Constraints]",
         "NEVER output plain text — only the JSON object.",
@@ -301,12 +309,18 @@ def _build_messages(ctx: OrchestrationContext) -> list[dict[str, str]]:
 # STEP 2b — Multi-message reply parsing
 # =====================================================================
 
-def _parse_reply_messages(content: str) -> list[dict]:
+def _parse_ai_response(content: str) -> dict:
     """
-    Parse the AI response as a multi-message JSON array.
+    Parse the full AI response JSON.
 
     Expected format:
-        {"messages": [{"content": "hey", "interval": 2000}, ...]}
+        {
+            "messages": [{"content": "hey", "interval": 2000}, ...],
+            "schedule": {"context": "...", "delay_minutes": 1440}  (optional)
+        }
+
+    Returns:
+        {"messages": [...], "schedule": {...} | None}
 
     Falls back gracefully to a single message if JSON is absent or malformed.
     """
@@ -319,21 +333,32 @@ def _parse_reply_messages(content: str) -> list[dict]:
 
     try:
         parsed = json.loads(stripped)
-        if isinstance(parsed, dict) and isinstance(parsed.get("messages"), list):
+        if isinstance(parsed, dict):
+            # Parse messages
             messages = []
-            for m in parsed["messages"]:
+            for m in parsed.get("messages", []):
                 if isinstance(m, dict) and m.get("content"):
                     messages.append({
                         "content": str(m["content"]),
                         "interval": max(0, int(m.get("interval", 1500))),
                     })
+
+            # Parse optional schedule
+            schedule = None
+            raw_sched = parsed.get("schedule")
+            if isinstance(raw_sched, dict) and raw_sched.get("context"):
+                schedule = {
+                    "context": str(raw_sched["context"]),
+                    "delay_minutes": max(1, int(raw_sched.get("delay_minutes", 60))),
+                }
+
             if messages:
-                return messages
+                return {"messages": messages, "schedule": schedule}
     except (ValueError, TypeError, KeyError):
         pass
 
     # Fall back — treat entire content as a single message
-    return [{"content": content, "interval": 0}]
+    return {"messages": [{"content": content, "interval": 0}], "schedule": None}
 
 
 # =====================================================================
@@ -427,8 +452,10 @@ async def handle_inbound_message(event: dict[str, Any]) -> None:
     if not raw_content:
         raw_content = '{"messages": [{"content": "wait say that again?", "interval": 0}]}'
 
-    # Parse into multi-message format (falls back to single message if JSON absent)
-    reply_messages = _parse_reply_messages(raw_content)
+    # Parse into multi-message format + optional schedule
+    parsed_response = _parse_ai_response(raw_content)
+    reply_messages = parsed_response["messages"]
+    scheduled = parsed_response["schedule"]
     full_reply_text = " ".join(m["content"] for m in reply_messages)
 
     # 4. Persist combined assistant reply
@@ -514,6 +541,16 @@ async def handle_inbound_message(event: dict[str, Any]) -> None:
         await event_bus.publish(MEMORY_SUMMARY_REQUESTED, summary_event.model_dump())
         logger.info("Triggered summarization for conv %s at length %d", conversation_id, conv_length)
 
+    # Write cron task if Chloe scheduled a future follow-up
+    if scheduled:
+        asyncio.create_task(_write_cron_task_background(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            external_user_id=event.get("external_user_id", ""),
+            context=scheduled["context"],
+            delay_minutes=scheduled["delay_minutes"],
+        ))
+
     # Update idle tracker — resets the 5-min close-up timer on each new message
     _idle_tracker[conversation_id] = {
         "last_seen": datetime.now(timezone.utc),
@@ -580,6 +617,140 @@ async def _update_profile_background(
         logger.info("Background profile update complete for %s", user_id)
     except Exception:
         logger.exception("Background profile update failed for %s", user_id)
+
+
+async def _write_cron_task_background(
+    user_id: str,
+    conversation_id: str,
+    external_user_id: str,
+    context: str,
+    delay_minutes: int,
+) -> None:
+    """Write a scheduled cron task to db-manager so the cron service can pick it up."""
+    try:
+        await conversation_store_client.write_cron_task(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            external_user_id=external_user_id,
+            context=context,
+            delay_minutes=delay_minutes,
+        )
+        logger.info("Cron task scheduled for %s in %d min: %s", user_id, delay_minutes, context)
+    except Exception:
+        logger.exception("Failed to write cron task for %s", user_id)
+
+
+async def handle_proactive_message(
+    user_id: str,
+    conversation_id: str,
+    external_user_id: str,
+    context: str,
+) -> None:
+    """
+    Generate and send a proactive message from Chloe, triggered by the cron service.
+
+    Called when a previously scheduled follow-up is due.
+    """
+    logger.info("Cron trigger — proactive message for %s: %s", user_id, context)
+
+    # Fetch context in parallel
+    username = external_user_id.split(":")[-1] if ":" in external_user_id else ""
+    profile_data, rel_data = await asyncio.gather(
+        user_profile_client.get_user_profile(user_id, username),
+        relationship_client.get_relationship_context(user_id),
+        return_exceptions=True,
+    )
+
+    user_ctx = UserContext(user_id=user_id)
+    if isinstance(profile_data, dict):
+        user_ctx = UserContext(
+            user_id=user_id,
+            display_name=profile_data.get("display_name", "friend"),
+            language=profile_data.get("language", "en"),
+            timezone=profile_data.get("timezone", "UTC"),
+            tone=profile_data.get("tone", "friendly"),
+            interests=profile_data.get("interests", []),
+            onboarding_state=profile_data.get("onboarding_state", "completed"),
+            consent_personalization=profile_data.get("consent_personalization", True),
+        )
+
+    rel_ctx = RelationshipContext()
+    if isinstance(rel_data, dict):
+        rel_ctx = RelationshipContext(
+            affinity_score=rel_data.get("affinity_score", 0.5),
+            tier=rel_data.get("tier", "friend"),
+            interaction_count=rel_data.get("interaction_count", 0),
+            days_inactive=rel_data.get("decay_state", {}).get("days_inactive", 0),
+        )
+
+    ctx = OrchestrationContext(
+        user=user_ctx,
+        relationship=rel_ctx,
+        memory=MemoryContext(),
+        conversation_id=conversation_id,
+        correlation_id=_new_event_id(),
+        current_message="",
+    )
+
+    # Build proactive system prompt — Chloe is initiating
+    proactive_system = _build_system_prompt(ctx) + (
+        f"\n\n[Proactive Reach-out]\n"
+        f"You are reaching out to {user_ctx.display_name} on your own initiative.\n"
+        f"Reason: {context}\n"
+        f"Start the conversation naturally based on this — don't mention you 'scheduled' this."
+    )
+
+    ai_result = await ai_generation_client.generate_chat_completion(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        messages=[
+            {"role": "system", "content": proactive_system},
+            {"role": "user", "content": "[Chloe initiates]"},
+        ],
+        correlation_id=_new_event_id(),
+    )
+
+    if ai_result is None:
+        logger.error("Proactive AI generation failed for %s — aborting", user_id)
+        return
+
+    outputs = ai_result.get("output", [])
+    raw_content = next((o.get("content", "") for o in outputs if o.get("type") == "text"), "")
+    if not raw_content:
+        return
+
+    parsed = _parse_ai_response(raw_content)
+    reply_messages = parsed["messages"]
+    full_reply_text = " ".join(m["content"] for m in reply_messages)
+
+    # Persist proactive message
+    reply_timestamp = _utcnow()
+    await conversation_store_client.persist_messages(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        channel="telegram",
+        messages=[{"role": "assistant", "type": "text", "content": full_reply_text, "timestamp": reply_timestamp}],
+        correlation_id="cron",
+    )
+
+    # Publish outbound with intervals
+    for i, msg in enumerate(reply_messages):
+        if i > 0:
+            await asyncio.sleep(reply_messages[i - 1]["interval"] / 1000.0)
+        outbound_event = ConversationOutboundEvent(
+            event_id=_new_event_id(),
+            correlation_id="cron",
+            timestamp=_utcnow(),
+            user_id=user_id,
+            external_user_id=external_user_id,
+            channel="telegram",
+            conversation_id=conversation_id,
+            responses=[ResponseItem(type="text", content=msg["content"])],
+            metadata={"model": ai_result.get("model", "unknown"), "proactive": True},
+        )
+        await event_bus.publish(CONVERSATION_OUTBOUND, outbound_event.model_dump())
+
+    logger.info("Proactive message sent to %s: %s", user_id, full_reply_text[:80])
 
 
 async def _publish_failure(event: dict, stage: str, error_code: str) -> None:

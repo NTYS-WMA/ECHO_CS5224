@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     #App
     app_host: str = Field(default="0.0.0.0")
     app_port: int = Field(default=8000)
+    service_base_url: str = Field(default="http://localhost:8000", description="Public base URL of this service — used for cron callbacks")
     log_level: str = Field(default="INFO")
     mock_services: bool = Field(default=True, description="Use mock clients when True")
 
