@@ -71,7 +71,9 @@ app = FastAPI(
 #Include Routers
 
 from channel_gateway.api.webhook import router as telegram_router
+from channel_gateway.api.cron_endpoint import router as cron_router
 app.include_router(telegram_router)
+app.include_router(cron_router)
 
 
 #Health & Debug Endpoints

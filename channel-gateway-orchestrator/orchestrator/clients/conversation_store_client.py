@@ -17,7 +17,7 @@ Falls back to in-memory when MOCK_SERVICES=true or db-manager is unavailable.
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import httpx
@@ -161,3 +161,49 @@ async def get_recent_messages(
 def get_conversation_length(conversation_id: str) -> int:
     """Return total message count for a conversation (for summarization threshold check)."""
     return len(_in_memory_store.get(conversation_id, []))
+
+
+async def write_cron_task(
+    user_id: str,
+    conversation_id: str,
+    external_user_id: str,
+    context: str,
+    delay_minutes: int,
+) -> bool:
+    """
+    Register a one-time scheduled event in db-manager.
+
+    The cron service polls /scheduled-events/due/poll every 30s and
+    calls back to POST /api/v1/cron/trigger on this service when due.
+    """
+    if settings.mock_services:
+        logger.debug("[MOCK] Cron task scheduled for %s in %d min: %s", user_id, delay_minutes, context)
+        return True
+
+    try:
+        scheduled_at = (datetime.now(timezone.utc) + timedelta(minutes=delay_minutes)).isoformat()
+
+        client = _get_client()
+        payload = {
+            "event_name": f"chloe-followup-{user_id}",
+            "event_type": "one_time",
+            "caller_service": "channel-gateway-orchestrator",
+            "callback_url": f"{settings.service_base_url}/api/v1/cron/trigger",
+            "scheduled_at": scheduled_at,
+            "next_fire_at": scheduled_at,
+            "payload": {
+                "user_id": user_id,
+                "conversation_id": conversation_id,
+                "external_user_id": external_user_id,
+                "context": context,
+            },
+            "group_key": user_id,
+            "correlation_id": conversation_id,
+        }
+        resp = await client.post("/scheduled-events", json=payload)
+        resp.raise_for_status()
+        logger.info("Cron task registered for %s, due at %s", user_id, scheduled_at)
+        return True
+    except Exception:
+        logger.exception("Failed to write cron task for %s", user_id)
+        return False
