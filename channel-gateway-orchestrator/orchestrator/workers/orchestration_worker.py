@@ -397,7 +397,17 @@ async def handle_inbound_message(event: dict[str, Any]) -> None:
         first_name=first_name,
     )
 
-    # 1. Persist inbound user message
+    # 1. Assemble context BEFORE persisting the current message so it doesn't
+    #    appear twice in short_term_messages (history is fetched here, current
+    #    message is appended explicitly in _build_messages).
+    try:
+        ctx = await _assemble_context(event)
+    except Exception:
+        logger.exception("Context assembly failed for event %s", event_id)
+        await _publish_failure(event, stage="context_assembly", error_code="CONTEXT_ERROR")
+        return
+
+    # 2. Persist inbound user message (after context fetch to avoid duplication)
     await conversation_store_client.persist_messages(
         conversation_id=conversation_id,
         user_id=user_id,
@@ -410,14 +420,6 @@ async def handle_inbound_message(event: dict[str, Any]) -> None:
         }],
         correlation_id=event_id,
     )
-
-    #2. Assemble context (profile, relationship, memory)
-    try:
-        ctx = await _assemble_context(event)
-    except Exception:
-        logger.exception("Context assembly failed for event %s", event_id)
-        await _publish_failure(event, stage="context_assembly", error_code="CONTEXT_ERROR")
-        return
 
     # 3. Call AI Generation
     try:
