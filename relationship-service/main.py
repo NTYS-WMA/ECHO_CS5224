@@ -54,6 +54,7 @@ def _create_scheduler() -> AsyncIOScheduler:
         id="session_score",
         replace_existing=True,
         misfire_grace_time=120,
+        coalesce=True,
     )
     scheduler.add_job(
         inactivity_decay_job,
