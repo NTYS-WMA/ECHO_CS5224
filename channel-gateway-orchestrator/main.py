@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
 
     # Register the orchestration worker (consumes conversation.message.received)
     from orchestrator.workers.orchestration_worker import register_orchestration_worker
-    register_orchestration_worker()
+    await register_orchestration_worker()
 
     # Register the outbound delivery worker (consumes conversation.outbound)
     from channel_gateway.workers.outbound_worker import register_outbound_worker

@@ -3,22 +3,26 @@ Prompt Template Manager — storage, registration, query, and update.
 
 The TemplateManager is responsible for:
 - Loading preset templates from the prompt_templates/ directory on startup.
-- Registering new templates submitted by business callers.
-- Updating existing templates (content only, not direct editing of prompt logic).
+- Syncing preset templates to the database (via db-manager) for durability.
+- Loading all templates from the database on startup (including dynamically registered ones).
+- Registering new templates submitted by business callers (persisted to DB).
+- Updating existing templates (persisted to DB).
 - Querying templates by ID, category, owner, or tags.
-- Persisting template metadata to a JSON index file for durability.
 
-Templates are stored as individual JSON files in the prompt_templates/ directory.
-A metadata index (template_index.json) tracks all registered templates.
+Templates are persisted in the database via the db-manager service so they
+survive container restarts.  Preset JSON files in prompt_templates/ serve as
+seed data that is upserted into the DB on every startup.
 """
 
+import asyncio
 import json
 import logging
 import os
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
+
+import httpx
 
 from ..models.templates import (
     PromptTemplate,
@@ -37,72 +41,69 @@ class TemplateManager:
     """
     Manages the lifecycle of prompt templates.
 
-    Templates are loaded from disk on initialization and cached in memory.
-    Mutations (register, update) are persisted back to disk.
+    Templates are loaded from the database on initialization and cached in memory.
+    Preset templates (JSON files) are synced to the DB on startup.
+    Mutations (register, update) are persisted to the DB via db-manager.
     """
 
-    def __init__(self, templates_dir: str):
-        """
-        Initialize the TemplateManager.
-
-        Args:
-            templates_dir: Absolute path to the prompt_templates/ directory.
-        """
+    def __init__(self, templates_dir: str, db_manager_url: str, db_manager_api_key: Optional[str] = None):
         self._templates_dir = Path(templates_dir)
         self._templates: Dict[str, PromptTemplate] = {}
-        self._index_path = self._templates_dir / "template_index.json"
+        self._db_manager_url = db_manager_url.rstrip("/")
+        self._headers: dict[str, str] = {}
+        if db_manager_api_key:
+            self._headers["X-API-Key"] = db_manager_api_key
 
     # ------------------------------------------------------------------ #
     # Lifecycle
     # ------------------------------------------------------------------ #
 
-    def load_templates(self) -> int:
+    async def load_templates(self) -> int:
         """
-        Load all template JSON files from the templates directory.
+        Load templates into memory, ensuring the service starts quickly.
+
+        Strategy:
+        1. Load preset templates from local JSON files (instant, no network).
+        2. Try to load all templates from DB (picks up dynamically registered
+           ones that survived a restart).  If db-manager is unreachable the
+           presets loaded in step 1 are still available — the service is NOT
+           blocked.
+        3. Sync presets to DB in a background task so it never delays startup.
 
         Returns:
-            Number of templates loaded.
+            Number of templates loaded into memory.
         """
-        if not self._templates_dir.exists():
-            logger.warning(
-                "Templates directory does not exist: %s", self._templates_dir
-            )
-            return 0
+        # Step 1: Load presets from local JSON — always available, zero latency
+        self._load_presets_from_disk()
 
-        loaded = 0
-        for filepath in sorted(self._templates_dir.glob("*.json")):
-            if filepath.name == "template_index.json":
-                continue
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                template = PromptTemplate(**data)
-                self._templates[template.template_id] = template
-                loaded += 1
-                logger.info(
-                    "Loaded template: %s (%s)", template.template_id, template.name
-                )
-            except Exception as e:
-                logger.error("Failed to load template from %s: %s", filepath, str(e))
+        # Step 2: Try loading from DB (adds any dynamically registered templates)
+        db_ok = await self._load_from_db()
 
-        logger.info("Loaded %d templates from %s", loaded, self._templates_dir)
-        self._save_index()
-        return loaded
+        # Step 3: Sync presets to DB in the background (non-blocking)
+        if db_ok:
+            asyncio.create_task(self._sync_presets_to_db())
+        else:
+            # db-manager not ready yet — retry sync in background with delay
+            asyncio.create_task(self._deferred_sync())
+
+        logger.info("Loaded %d templates into memory", len(self._templates))
+        return len(self._templates)
+
+    async def _deferred_sync(self) -> None:
+        """Retry DB sync after a delay when db-manager wasn't ready at startup."""
+        await asyncio.sleep(10)
+        logger.info("Retrying deferred DB sync for preset templates...")
+        db_ok = await self._load_from_db()
+        if db_ok:
+            await self._sync_presets_to_db()
+        else:
+            logger.warning("db-manager still unreachable; preset sync skipped")
 
     # ------------------------------------------------------------------ #
     # Query Operations
     # ------------------------------------------------------------------ #
 
     def get_template(self, template_id: str) -> Optional[PromptTemplate]:
-        """
-        Retrieve a template by ID.
-
-        Args:
-            template_id: The unique template identifier.
-
-        Returns:
-            The PromptTemplate if found, else None.
-        """
         return self._templates.get(template_id)
 
     def list_templates(
@@ -111,17 +112,6 @@ class TemplateManager:
         owner: Optional[str] = None,
         tag: Optional[str] = None,
     ) -> List[TemplateListItem]:
-        """
-        List templates with optional filtering.
-
-        Args:
-            category: Filter by category.
-            owner: Filter by owner.
-            tag: Filter by tag.
-
-        Returns:
-            List of TemplateListItem summaries.
-        """
         results = []
         for tpl in self._templates.values():
             if category and tpl.category != category:
@@ -148,23 +138,8 @@ class TemplateManager:
     # Registration
     # ------------------------------------------------------------------ #
 
-    def register_template(self, request: TemplateRegisterRequest) -> PromptTemplate:
-        """
-        Register a new template.
-
-        Assigns a unique template_id, persists to disk, and returns the
-        full template with its ID and variable schema.
-
-        Args:
-            request: The registration request from the business caller.
-
-        Returns:
-            The newly created PromptTemplate.
-
-        Raises:
-            ValueError: If a template with the same name and owner already exists.
-        """
-        # Check for duplicate name+owner
+    async def register_template(self, request: TemplateRegisterRequest) -> PromptTemplate:
+        # Check for duplicate name+owner in memory cache
         for tpl in self._templates.values():
             if tpl.name == request.name and tpl.owner == request.owner:
                 raise ValueError(
@@ -191,9 +166,11 @@ class TemplateManager:
             updated_at=now,
         )
 
+        # Persist to DB first
+        await self._persist_template_to_db(template)
+
+        # Update in-memory cache
         self._templates[template_id] = template
-        self._persist_template(template)
-        self._save_index()
 
         logger.info(
             "Registered new template: %s (%s) by %s",
@@ -207,30 +184,13 @@ class TemplateManager:
     # Update
     # ------------------------------------------------------------------ #
 
-    def update_template(
+    async def update_template(
         self, template_id: str, request: TemplateUpdateRequest
     ) -> PromptTemplate:
-        """
-        Update an existing template.
-
-        Only the fields provided in the request are updated. The version
-        is bumped and updated_at is refreshed automatically.
-
-        Args:
-            template_id: The template to update.
-            request: The update request with partial fields.
-
-        Returns:
-            The updated PromptTemplate.
-
-        Raises:
-            KeyError: If the template does not exist.
-        """
         template = self._templates.get(template_id)
         if template is None:
             raise KeyError(f"Template '{template_id}' not found.")
 
-        # Apply partial updates
         update_data = request.model_dump(exclude_unset=True)
         template_data = template.model_dump()
 
@@ -238,14 +198,16 @@ class TemplateManager:
             if value is not None:
                 template_data[key] = value
 
-        # Bump version
         template_data["version"] = self._bump_version(template_data["version"])
         template_data["updated_at"] = datetime.now(timezone.utc)
 
         updated_template = PromptTemplate(**template_data)
+
+        # Persist to DB first
+        await self._persist_template_to_db(updated_template)
+
+        # Update in-memory cache
         self._templates[template_id] = updated_template
-        self._persist_template(updated_template)
-        self._save_index()
 
         logger.info(
             "Updated template: %s to version %s",
@@ -255,44 +217,125 @@ class TemplateManager:
         return updated_template
 
     # ------------------------------------------------------------------ #
-    # Internal Helpers
+    # DB Persistence Helpers
     # ------------------------------------------------------------------ #
 
-    def _persist_template(self, template: PromptTemplate) -> None:
-        """Write a template to its JSON file on disk."""
-        # Derive filename from template_id
-        safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", template.template_id)
-        filepath = self._templates_dir / f"{safe_name}.json"
-        try:
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(
-                    template.model_dump(mode="json"),
-                    f,
-                    indent=2,
-                    ensure_ascii=False,
-                    default=str,
-                )
-            logger.debug("Persisted template to %s", filepath)
-        except Exception as e:
-            logger.error("Failed to persist template %s: %s", template.template_id, str(e))
+    async def _persist_template_to_db(self, template: PromptTemplate) -> None:
+        """Upsert a template to the database via db-manager."""
+        payload = template.model_dump(mode="json")
+        # Ensure datetime fields are ISO strings
+        for field in ("created_at", "updated_at"):
+            if isinstance(payload.get(field), datetime):
+                payload[field] = payload[field].isoformat()
 
-    def _save_index(self) -> None:
-        """Save the template index file for quick lookups."""
-        index = {}
-        for tid, tpl in self._templates.items():
-            index[tid] = {
-                "name": tpl.name,
-                "owner": tpl.owner,
-                "category": tpl.category,
-                "version": tpl.version,
-                "tags": tpl.tags,
-                "updated_at": tpl.updated_at.isoformat(),
-            }
         try:
-            with open(self._index_path, "w", encoding="utf-8") as f:
-                json.dump(index, f, indent=2, ensure_ascii=False)
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.put(
+                    f"{self._db_manager_url}/templates",
+                    json=payload,
+                    headers=self._headers,
+                )
+                r.raise_for_status()
+            logger.debug("Persisted template %s to DB", template.template_id)
         except Exception as e:
-            logger.error("Failed to save template index: %s", str(e))
+            logger.error("Failed to persist template %s to DB: %s", template.template_id, str(e))
+            raise
+
+    def _load_presets_from_disk(self) -> None:
+        """Load preset templates from local JSON files into memory."""
+        if not self._templates_dir.exists():
+            logger.warning("Templates directory does not exist: %s", self._templates_dir)
+            return
+
+        for filepath in sorted(self._templates_dir.glob("*.json")):
+            if filepath.name == "template_index.json":
+                continue
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                template = PromptTemplate(**data)
+                self._templates[template.template_id] = template
+                logger.info("Loaded preset template: %s (%s)", template.template_id, template.name)
+            except Exception as e:
+                logger.error("Failed to load preset template %s: %s", filepath.name, str(e))
+
+    async def _load_from_db(self) -> bool:
+        """Load all templates from DB into the in-memory cache.
+
+        Returns True if DB was reachable, False otherwise.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                r = await client.get(
+                    f"{self._db_manager_url}/templates/all",
+                    headers=self._headers,
+                )
+                r.raise_for_status()
+            data = r.json()
+            for item in data.get("templates", []):
+                try:
+                    template = self._dict_to_template(item)
+                    self._templates[template.template_id] = template
+                except Exception as e:
+                    logger.error("Failed to parse template from DB: %s", str(e))
+            return True
+        except Exception as e:
+            logger.warning("Failed to load templates from DB (service may not be ready): %s", str(e))
+            return False
+
+    async def _sync_presets_to_db(self) -> None:
+        """Load preset JSON files from disk and upsert them into the DB."""
+        if not self._templates_dir.exists():
+            logger.warning("Templates directory does not exist: %s", self._templates_dir)
+            return
+
+        for filepath in sorted(self._templates_dir.glob("*.json")):
+            if filepath.name == "template_index.json":
+                continue
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                template = PromptTemplate(**data)
+                await self._persist_template_to_db(template)
+                logger.info("Synced preset template to DB: %s (%s)", template.template_id, template.name)
+            except Exception as e:
+                logger.error("Failed to sync preset template %s to DB: %s", filepath.name, str(e))
+
+    # ------------------------------------------------------------------ #
+    # Conversion Helpers
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _dict_to_template(data: dict) -> PromptTemplate:
+        """Convert a dict (from DB API response) into a PromptTemplate."""
+        # Parse nested variable schemas
+        variables = {}
+        raw_vars = data.get("variables") or {}
+        for var_name, var_schema in raw_vars.items():
+            if isinstance(var_schema, dict):
+                variables[var_name] = TemplateVariableSchema(**var_schema)
+            else:
+                variables[var_name] = var_schema
+
+        defaults = None
+        if data.get("defaults"):
+            defaults = TemplateDefaults(**data["defaults"])
+
+        return PromptTemplate(
+            template_id=data["template_id"],
+            name=data["name"],
+            description=data.get("description", ""),
+            version=data.get("version", "1.0.0"),
+            owner=data["owner"],
+            category=data.get("category", "general"),
+            system_prompt=data["system_prompt"],
+            user_prompt_template=data["user_prompt_template"],
+            variables=variables,
+            defaults=defaults,
+            tags=data.get("tags", []),
+            created_at=data["created_at"],
+            updated_at=data["updated_at"],
+        )
 
     @staticmethod
     def _bump_version(version: str) -> str:

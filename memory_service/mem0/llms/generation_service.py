@@ -104,9 +104,13 @@ class GenerationServiceLLM(LLMBase):
                     for tpl in list_resp.json().get("templates", []):
                         if tpl.get("name") == PASSTHROUGH_TEMPLATE["name"]:
                             self._actual_template_id = tpl["template_id"]
-                            break
-                logger.info(f"GenerationServiceLLM: passthrough template already exists, id={self._actual_template_id}")
-                return True
+                            logger.info(f"GenerationServiceLLM: passthrough template already exists, id={self._actual_template_id}")
+                            return True
+                logger.error(
+                    f"GenerationServiceLLM: got 409 but could not find template by name "
+                    f"(list_status={list_resp.status_code if list_resp else 'N/A'})"
+                )
+                return False
             logger.error(
                 f"GenerationServiceLLM: template registration failed "
                 f"(status={resp.status_code}, body={resp.text[:200]})"
@@ -235,6 +239,22 @@ class GenerationServiceLLM(LLMBase):
                 json=payload,
                 timeout=60,
             )
+            if resp.status_code == 400:
+                # Template may have been lost (e.g. AI service container recreated).
+                # Attempt re-registration and retry once.
+                logger.warning(
+                    f"GenerationServiceLLM: got 400 (template_id={self._actual_template_id}), "
+                    "attempting re-registration."
+                )
+                if self._register_template():
+                    payload["template_id"] = self._actual_template_id
+                    resp = requests.post(
+                        f"{self._service_url}/api/v1/generation/execute",
+                        json=payload,
+                        timeout=60,
+                    )
+                else:
+                    raise RuntimeError("Re-registration failed after 400.")
             resp.raise_for_status()
             data = resp.json()
             return data["output"][0]["content"]

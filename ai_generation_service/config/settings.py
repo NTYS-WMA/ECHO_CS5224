@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     BEDROCK_REGION: str = "ap-southeast-1"
     BEDROCK_MODEL_ID: str = "apac.anthropic.claude-sonnet-4-20250514-v1:0"
     BEDROCK_MAX_RETRIES: int = 2
-    BEDROCK_TIMEOUT_SECONDS: int = 30
+    BEDROCK_TIMEOUT_SECONDS: int = 20
     BEDROCK_EMBEDDING_MODEL_ID: str = "cohere.embed-multilingual-v3"
 
     # Fallback AI provider (optional, e.g., OpenAI-compatible endpoint)
@@ -43,13 +43,17 @@ class Settings(BaseSettings):
     # but can be overridden for custom deployments.
     TEMPLATES_DIR_OVERRIDE: Optional[str] = None
 
+    # DB Manager service URL for persistent template storage
+    DB_MANAGER_URL: str = "http://db-manager:18087"
+    DB_MANAGER_API_KEY: Optional[str] = None
+
     # Event broker configuration
     # TO BE UPDATED: Actual broker implementation details (e.g., Redis Streams, RabbitMQ, or local queue)
     EVENT_BROKER_URL: str = "redis://localhost:6379/0"
     EVENT_PUBLISH_ENABLED: bool = True
 
     # Retry and fallback policy
-    MAX_RETRY_ATTEMPTS: int = 5
+    MAX_RETRY_ATTEMPTS: int = 2
     RETRY_BACKOFF_BASE_SECONDS: float = 1.0
     FALLBACK_ON_TIMEOUT: bool = True
     FALLBACK_ON_PROVIDER_ERROR: bool = True
