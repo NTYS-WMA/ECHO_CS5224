@@ -1,22 +1,22 @@
 services:
   postgres:
-      image: ankane/pgvector:v0.5.1
-      restart: on-failure
-      shm_size: "128mb" # Increase this if vacuuming fails with a "no space left on device" error
-      networks:
-        - mem0_network
-      environment:
-        - POSTGRES_USER=postgres
-        - POSTGRES_PASSWORD=postgres
-      healthcheck:
-        test: ["CMD", "pg_isready", "-q", "-d", "postgres", "-U", "postgres"]
-        interval: 5s
-        timeout: 5s
-        retries: 5
-      volumes:
-        - postgres_db:/var/lib/postgresql/data
-      ports:
-        - "8432:5432"
+    image: ankane/pgvector:v0.5.1
+    restart: on-failure
+    shm_size: "128mb" # Increase this if vacuuming fails with a "no space left on device" error
+    networks:
+      - mem0_network
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-d", "postgres", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_db:/var/lib/postgresql/data
+    ports:
+      - "8432:5432"
 
   mongodb:
     image: mongo:7.0
@@ -25,8 +25,8 @@ services:
     networks:
       - mem0_network
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=mongo
-      - MONGO_INITDB_ROOT_PASSWORD=mongo
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD}
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
@@ -41,7 +41,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-#      dockerfile: Dockerfile
+    #      dockerfile: Dockerfile
     container_name: mem0-api
     ports:
       - "18088:8000"
@@ -59,10 +59,10 @@ services:
       - POSTGRES_PORT=5432
       - POSTGRES_DB=postgres
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_COLLECTION=memories
       # MongoDB配置
-      - MONGODB_URI=mongodb://mongo:mongo@mongodb:27017/
+      - MONGODB_URI=mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017/
       - MONGODB_DATABASE=mem0
       # PalServer配置 (冷启动)
       - PALSERVER_BASE_URL=${PALSERVER_BASE_URL:-http://localhost:8099/pal}
