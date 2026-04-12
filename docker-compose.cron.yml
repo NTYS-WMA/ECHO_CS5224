@@ -12,7 +12,7 @@ services:
     environment:
       POSTGRES_DB: echo_db
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -32,8 +32,8 @@ services:
     ports:
       - "18087:18087"
     environment:
-      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@echo-postgres:5432/echo_db"
-      MONGODB_URI: "mongodb://mongo:mongo@mem0-mongodb:27017"
+      DATABASE_URL: "postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@echo-postgres:5432/echo_db"
+      MONGODB_URI: "mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mem0-mongodb:27017"
       MONGODB_DATABASE: "echo_db"
       AUTO_INIT_DB: "true"
       AUTH_ENABLED: "false"
@@ -41,7 +41,11 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:18087/health/live')\""]
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:18087/health/live'')"',
+        ]
       interval: 10s
       timeout: 5s
       retries: 10
