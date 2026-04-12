@@ -41,7 +41,7 @@ POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5432"))
 POSTGRES_DB = os.environ.get("POSTGRES_DB", "postgres")
 POSTGRES_USER = os.environ.get("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "postgres")
+POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "change-me")
 POSTGRES_COLLECTION = os.environ.get("POSTGRES_COLLECTION", "memories")
 EMBEDDING_MODEL_DIMS = int(os.environ.get("EMBEDDING_MODEL_DIMS", "1536"))  # overridden below if USE_GENERATION_SERVICE
 

@@ -28,12 +28,18 @@ services:
 
       # DB Manager service for template persistence
       - AI_GEN_DB_MANAGER_URL=http://host.docker.internal:18087
-      - AI_GEN_DB_MANAGER_API_KEY=echo-db-manager-service-2026
+      - AI_GEN_DB_MANAGER_API_KEY=${AI_GEN_DB_MANAGER_API_KEY}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3

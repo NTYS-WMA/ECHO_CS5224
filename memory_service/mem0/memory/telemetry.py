@@ -9,8 +9,8 @@ import mem0
 from mem0.memory.setup import get_or_create_user_id
 
 MEM0_TELEMETRY = os.environ.get("MEM0_TELEMETRY", "True")
-PROJECT_API_KEY = "phc_hgJkUVJFYtmaJqrvf6CYN67TIQ8yhXAkWzUn9AMU4yX"
-HOST = "https://us.i.posthog.com"
+PROJECT_API_KEY = os.environ.get("MEM0_POSTHOG_PROJECT_API_KEY", "").strip()
+HOST = os.environ.get("MEM0_POSTHOG_HOST", "https://us.i.posthog.com")
 
 if isinstance(MEM0_TELEMETRY, str):
     MEM0_TELEMETRY = MEM0_TELEMETRY.lower() in ("true", "1", "yes")
@@ -28,7 +28,7 @@ class AnonymousTelemetry:
 
         self.user_id = get_or_create_user_id(vector_store)
 
-        if not MEM0_TELEMETRY:
+        if not MEM0_TELEMETRY or not PROJECT_API_KEY:
             self.posthog.disabled = True
 
     def capture_event(self, event_name, properties=None, user_email=None):
