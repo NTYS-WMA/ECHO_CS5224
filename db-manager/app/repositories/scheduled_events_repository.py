@@ -36,14 +36,14 @@ class ScheduledEventsRepository:
                 cron_expression, interval_seconds, scheduled_at,
                 payload, next_fire_at, max_fires,
                 correlation_id, group_key, status
-            )
-            VALUES (
-                :event_name, :event_type, :caller_service,
-                :callback_url, :topic,
-                :cron_expression, :interval_seconds, :scheduled_at,
-                :payload::jsonb, :next_fire_at, :max_fires,
-                :correlation_id, :group_key, 'active'
-            )
+                )
+                VALUES (
+                    :event_name, :event_type, :caller_service,
+                    :callback_url, :topic,
+                    :cron_expression, :interval_seconds, :scheduled_at,
+                    CAST(:payload AS jsonb), :next_fire_at, :max_fires,
+                    :correlation_id, :group_key, 'active'
+                )
             RETURNING *
             """
         )
@@ -196,7 +196,7 @@ class ScheduledEventsRepository:
         params: dict[str, Any] = {"event_id": str(event_id)}
         for key, value in updates.items():
             if key == "payload":
-                set_clauses.append(f"{key} = :{key}::jsonb")
+                set_clauses.append(f"{key} = CAST(:{key} AS jsonb)")
                 params[key] = json.dumps(value)
             else:
                 set_clauses.append(f"{key} = :{key}")
